@@ -42,21 +42,21 @@ Project and run names must match `[A-Za-z0-9._-]{1,128}`, which rules out path t
 
 ## Delivery guarantees
 
-1. `log()` appends to an in-memory list under a lock. Nothing blocks on I/O.
+1. `log()` appends to an in-memory list under a lock. Network and disk work run outside the training call.
+   When the queue exceeds `max_buffer`, the background thread writes the oldest rows to spool files.
 2. A daemon thread flushes every `flush_interval` (1 s), sending the pending meta and rows in chunks
    of `chunk_size` (5,000) rows.
 3. On any exception the unsent remainder goes back to the front of the buffer, and the thread backs off
    exponentially (up to 30 s). A 4xx response other than 401, 408 or 429 is permanent, so those rows
    are dropped with a warning instead of being retried forever.
-4. The server keeps the last `(_sid, _seq)` it stored per run, initialized from the file's tail.
-   Rows with the same `_sid` and a `_seq` it has already seen are skipped. That makes a batch retried
-   after a lost response idempotent, while a resumed run (new `_sid`) still appends normally.
+4. The server tracks the highest stored sequence number per client session. It rebuilds that state
+   from the JSONL file on its first write after startup. Rows already stored for that session are
+   skipped, including delayed retries from a previous session.
 5. `finish()`, which is also registered with `atexit`, stops the thread, retries for up to 10 s, then
-   writes whatever is left to `~/.runboard/spool/<project>__<run_id>.jsonl`. `runboard sync` replays
-   spool files; the sequence numbers make replaying safe.
+   writes whatever is left to an atomic spool file in `~/.runboard/spool/`. `runboard sync` replays
+   spool files; session sequence numbers make replaying safe.
 
-This was validated by killing the server with `SIGKILL` twice during 8 concurrent 50k-step jobs, three
-times over: every run arrived complete with no duplicates.
+The tests cover retry after a lost connection, replay from spool, resumed runs, and duplicate batches.
 
 ## HTTP API
 

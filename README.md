@@ -26,8 +26,9 @@ that the internet can't reach.
   *outbound* Cloudflare quick tunnel. You don't need root, open ports, an account, or `ssh -L`.
 - **Zero dependencies.** The client, server, and dashboard use only the Python standard library.
   `pip install runboard` works on any cluster, even behind a restrictive proxy.
-- **Never breaks training.** `log()` is a ~15 µs in-memory append. A background thread ships batches,
-  buffers through server outages, and saves to disk if the server never comes back.
+- **Keeps network and disk work out of training.** `log()` appends metrics in memory; a background
+  thread sends batches, retries outages, and spills excess backlog to disk. Remaining metrics are
+  saved when the run finishes.
 - **Your data, plain files.** Runs are stored as `<project>/<run_id>/metrics.jsonl`, so you can
   `grep`, `rsync`, or load them into pandas.
 
@@ -114,6 +115,8 @@ More detail is in [docs/architecture.md](docs/architecture.md).
 ## Logging API
 
 ```python
+import runboard
+
 run = runboard.init(
     project="my-project",      # groups runs in the dashboard
     name="baseline-lr3e-4",    # display name (defaults to the run id)
@@ -139,8 +142,8 @@ runboard.finish()                                                # also runs aut
 
 ### When the server is unreachable
 
-Logging never raises into your code. If the server is down, rows are kept in memory and retried with
-backoff, and the job continues. Rows still unsent when the job exits are written to
+Network failures never run inside `log()`. If the server is down, rows are kept in memory and retried
+with backoff; excess backlog is saved in the background. Rows still unsent when the job exits are written to
 `~/.runboard/spool/`. Upload them later with:
 
 ```bash
@@ -198,9 +201,10 @@ or set `export RUNBOARD_DIR=~/runboard-runs` in your job script. The server pick
 - **Runs sidebar.** Search, project filter, and status badges. Click a run's name to see its config and metadata.
 - **Compare runs.** Select up to 8 runs. Each run keeps its color while it stays selected.
 - **One chart per metric.** Hover for exact values, drag to zoom, double-click to reset. Legends show each run's latest value.
-- **Controls.** EMA smoothing, log-scale y, x axis as step, relative time, or wall clock, and a regex metric filter.
+- **Controls.** EMA smoothing, log-scale y, x axis as step, relative time, or wall clock, a regex metric filter, and system/light/dark themes.
+- **Long runs.** Charts retain peaks and dips while reducing very large series to a display-sized sample. Original metrics remain in the JSONL files.
 - **Summary table.** Latest value of every metric for the selected runs.
-- Light and dark themes, and a layout that works on phones.
+- A responsive layout for phones and desktops.
 
 ## Configuration
 
@@ -243,9 +247,10 @@ public URL without SSH.
 Logging and the dashboard work on the internal network. The public URL needs outbound HTTPS from the
 server's machine. If that is blocked, use `ssh -L 8080:localhost:8080` as a fallback.
 
-**How much data can it handle?**
-Tested with 8 concurrent jobs of 50,000 steps each (400,000 rows, with 2–3 metrics per row). The
-dashboard renders all of it in under a second.
+**Can I log from any experiment?**
+Yes. Log numeric metrics with any names, group them with `/`, and include any JSON-compatible
+hyperparameters in the run config. The tracker has no framework dependency, so it can live in a plain
+Python loop or a PyTorch, JAX, or other training script. Each run's full metric history stays in JSONL.
 
 **Can I analyze the data myself?**
 Yes. Every run is `<dir>/<project>/<run_id>/metrics.jsonl`:

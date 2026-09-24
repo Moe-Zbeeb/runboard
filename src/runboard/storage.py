@@ -28,7 +28,7 @@ def clean_value(v):
         return f if math.isfinite(f) else None
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return ...
     return f if math.isfinite(f) else None
 
@@ -47,24 +47,23 @@ def clean_row(row):
     return out
 
 
-def _tail_seq(path):
-    none = (None, -1)
+def _sequence_state(path):
+    state = {}
     try:
         with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            f.seek(max(0, size - 65536))
-            data = f.read()
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                sid, seq = row.get("_sid"), row.get("_seq")
+                if isinstance(sid, str) and isinstance(seq, int):
+                    state[sid] = max(seq, state.get(sid, -1))
     except OSError:
-        return none
-    for line in reversed(data.splitlines()):
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict) and isinstance(row.get("_seq"), int):
-            return row.get("_sid"), row["_seq"]
-    return none
+        pass
+    return state
 
 
 class Storage:
@@ -106,22 +105,42 @@ class Storage:
             self.update_meta(project, run_id, {})
         p = d / "metrics.jsonl"
         with _lock_for(p):
-            sid, last = self._last_seq.get(p) or _tail_seq(p)
+            state = self._last_seq.get(p)
+            if state is None:
+                state = _sequence_state(p)
+            else:
+                state = dict(state)
             out = []
             for r in rows:
                 if not isinstance(r, dict):
                     continue
                 seq = r.get("_seq")
-                if isinstance(seq, int):
-                    if r.get("_sid") == sid and seq <= last:
+                sid = r.get("_sid")
+                if isinstance(seq, int) and isinstance(sid, str):
+                    if seq <= state.get(sid, -1):
                         continue
-                    sid, last = r.get("_sid"), seq
+                    state[sid] = seq
                 out.append(json.dumps(clean_row(r)) + "\n")
-            self._last_seq[p] = (sid, last)
             if not out:
+                self._last_seq[p] = state
                 return
-            with open(p, "a") as f:
-                f.write("".join(out))
+            if p.exists() and p.stat().st_size:
+                with open(p, "rb") as f:
+                    f.seek(-1, os.SEEK_END)
+                    incomplete = f.read(1) != b"\n"
+            else:
+                incomplete = False
+            try:
+                with open(p, "a") as f:
+                    if incomplete:
+                        f.write("\n")
+                    f.write("".join(out))
+                    f.flush()
+                    os.fsync(f.fileno())
+            except OSError:
+                self._last_seq.pop(p, None)
+                raise
+            self._last_seq[p] = state
 
     def read_meta(self, project, run_id):
         p = self.run_dir(project, run_id) / "meta.json"

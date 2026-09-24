@@ -10,7 +10,7 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">runboard</div>
+  <div class="brand"><span class="brand-mark"><i></i><i></i><i></i></span><span>runboard</span></div>
   <div class="controls">
     <label>Project
       <select id="project"></select>
@@ -27,6 +27,7 @@
     </label>
     <label class="check"><input id="logy" type="checkbox"> Log y</label>
     <input id="metric-filter" type="search" placeholder="Filter metrics (regex)">
+    <button id="theme" class="theme-button" type="button" aria-label="Change color theme">System theme</button>
     <span id="live" class="live" title="Auto-refresh every 2s"><span class="dot"></span><span id="live-text">live</span></span>
   </div>
 </header>

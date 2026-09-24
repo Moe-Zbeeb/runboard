@@ -28,7 +28,7 @@ def post_json(server, token, project, run_id, payload, timeout=10):
     url = f"{server.rstrip('/')}/api/runs/{quote(project)}/{quote(run_id)}"
     req = urllib.request.Request(
         url,
-        data=json.dumps(payload).encode(),
+        data=json.dumps(payload, default=str).encode(),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
     )
@@ -42,10 +42,20 @@ class _HttpSink:
         self.token = token
 
     def send(self, project, run_id, meta, rows):
-        payload = {"rows": rows}
-        if meta:
-            payload["meta"] = meta
-        post_json(self.server, self.token, project, run_id, payload)
+        pending = [(meta, rows)]
+        while pending:
+            batch_meta, batch = pending.pop()
+            payload = {"rows": batch}
+            if batch_meta:
+                payload["meta"] = batch_meta
+            try:
+                post_json(self.server, self.token, project, run_id, payload)
+            except urllib.error.HTTPError as e:
+                if e.code != 413 or len(batch) < 2:
+                    raise
+                middle = len(batch) // 2
+                pending.append(({}, batch[middle:]))
+                pending.append((batch_meta, batch[:middle]))
 
 
 class _FileSink:
@@ -105,8 +115,10 @@ class Run:
         self._send_lock = threading.Lock()
         self._step = 0
         self._seq = 0
-        self._sid = secrets.token_hex(4)
+        self._sid = secrets.token_hex(8)
         self._rows = []
+        self._overflow = []
+        self._pending_spools = []
         self._meta = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -177,21 +189,31 @@ class Run:
             if len(self._rows) > self.max_buffer:
                 overflow = self._rows[: len(self._rows) - self.max_buffer]
                 del self._rows[: len(overflow)]
-                self._spool({}, overflow)
+                self._overflow.extend(overflow)
 
     def _take(self):
         with self._lock:
-            rows, meta = self._rows, self._meta
+            rows, meta = self._overflow, self._meta
+            rows.extend(self._rows)
             self._rows, self._meta = [], {}
+            self._overflow = []
         return meta, rows
 
     def _restore(self, meta, rows):
         with self._lock:
-            self._rows[:0] = rows
+            self._overflow[:0] = rows
             self._meta = {**meta, **self._meta}
+
+    def _is_empty(self):
+        with self._lock:
+            return not (self._pending_spools or self._overflow or self._rows or self._meta)
 
     def _flush_once(self):
         with self._send_lock:
+            with self._lock:
+                pending_spool = self._pending_spools[0] if self._pending_spools else None
+            if pending_spool is not None:
+                return self._flush_spool(pending_spool)
             meta, rows = self._take()
             if not meta and not rows:
                 return True
@@ -221,10 +243,64 @@ class Run:
                     self._warned = True
                 return False
 
+    def _flush_spool(self, path):
+        try:
+            rec = json.loads(path.read_text())
+            rows = rec.get("rows", [])
+            meta = rec.get("meta") or {}
+            for i in range(0, max(len(rows), 1), self.chunk_size):
+                self._sink.send(self.project, self.run_id, meta, rows[i : i + self.chunk_size])
+                meta = {}
+            path.unlink()
+            with self._lock:
+                self._pending_spools.remove(path)
+            if self._warned:
+                _warn("connection restored")
+                self._warned = False
+            return True
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500 and e.code not in (401, 408, 429):
+                _warn(f"server rejected spooled metrics ({e.code}: {e.reason}); dropping {path}")
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                with self._lock:
+                    if path in self._pending_spools:
+                        self._pending_spools.remove(path)
+                return True
+            if not self._warned:
+                _warn(f"could not send metrics ({e}); buffering and retrying")
+                self._warned = True
+            return False
+        except Exception as e:
+            if not self._warned:
+                _warn(f"could not send metrics ({e}); buffering and retrying")
+                self._warned = True
+            return False
+
+    def _spill_overflow(self):
+        with self._lock:
+            rows, self._overflow = self._overflow, []
+        if not rows:
+            return
+        try:
+            paths = [self._spool({}, rows[i : i + self.chunk_size * 10]) for i in range(0, len(rows), self.chunk_size * 10)]
+        except OSError as e:
+            with self._lock:
+                self._overflow[:0] = rows
+            if not self._warned:
+                _warn(f"could not spool metrics ({e}); retaining them in memory")
+                self._warned = True
+            return
+        with self._lock:
+            self._pending_spools.extend(paths)
+
     def _loop(self):
         delay = self.flush_interval
         while not self._stop.wait(delay):
             try:
+                self._spill_overflow()
                 ok = self._flush_once()
             except Exception:
                 ok = False
@@ -233,9 +309,18 @@ class Run:
     def _spool(self, meta, rows):
         d = spool_dir()
         d.mkdir(parents=True, exist_ok=True)
-        p = d / f"{self.project}__{self.run_id}.jsonl"
-        with open(p, "a") as f:
-            f.write(json.dumps({"project": self.project, "run_id": self.run_id, "meta": meta, "rows": rows}) + "\n")
+        first_seq = rows[0].get("_seq", 0) if rows else 0
+        p = d / f"{self.project[:48]}__{self.run_id[:48]}__{self._sid}__{first_seq:020d}.jsonl"
+        tmp = p.with_suffix(".jsonl.tmp")
+        tmp.write_text(json.dumps({"project": self.project, "run_id": self.run_id, "meta": meta, "rows": rows}, default=str) + "\n")
+        with open(tmp, "rb") as f:
+            os.fsync(f.fileno())
+        os.replace(tmp, p)
+        fd = os.open(d, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
         return p
 
     def finish(self, status="finished", timeout=10.0):
@@ -247,18 +332,24 @@ class Run:
         self._set_meta(status=status, finished=time.time())
         deadline = time.time() + timeout
         while True:
-            if self._flush_once():
+            if self._flush_once() and self._is_empty():
                 return
             if time.time() >= deadline:
                 break
             time.sleep(1.0)
         with self._send_lock:
             meta, rows = self._take()
-        try:
-            p = self._spool(meta, rows)
-            _warn(f"server unreachable; {len(rows)} rows saved to {p}. Upload later with `runboard sync`.")
-        except OSError as e:
-            _warn(f"server unreachable and could not write spool file ({e}); {len(rows)} rows lost")
+        if rows or meta:
+            try:
+                p = self._spool(meta, rows)
+                _warn(f"server unreachable; {len(rows)} rows saved to {p}. Upload later with `runboard sync`.")
+            except OSError as e:
+                self._restore(meta, rows)
+                _warn(f"server unreachable and could not write spool file ({e}); metrics remain in memory")
+        with self._lock:
+            pending_spools = list(self._pending_spools)
+        if pending_spools:
+            _warn(f"server unreachable; {len(pending_spools)} metric batches saved to {spool_dir()}. Upload later with `runboard sync`.")
 
     def __enter__(self):
         return self
@@ -273,6 +364,7 @@ def sync(server=None, token=None, paths=None):
     token = token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
     if not (server and token):
         raise ValueError("no server/token configured")
+    sink = _HttpSink(server, token)
     files = [Path(p) for p in paths] if paths else sorted(spool_dir().glob("*.jsonl"))
     total = 0
     for p in files:
@@ -283,7 +375,7 @@ def sync(server=None, token=None, paths=None):
             rows = rec["rows"]
             meta = rec.get("meta") or None
             for i in range(0, max(len(rows), 1), 5000):
-                post_json(server, token, rec["project"], rec["run_id"], {"meta": meta, "rows": rows[i : i + 5000]})
+                sink.send(rec["project"], rec["run_id"], meta, rows[i : i + 5000])
                 meta = None
             total += len(rows)
         p.unlink()

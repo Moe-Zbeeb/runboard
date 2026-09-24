@@ -122,6 +122,8 @@ def make_handler(storage, token):
                     storage.append_rows(project, run_id, rows)
             except ValueError as e:
                 return self._send(400, {"error": str(e)})
+            except OSError:
+                return self._send(503, {"error": "storage unavailable"})
             self._send(200, {"ok": True, "n": len(rows)})
 
         def _static(self, name):

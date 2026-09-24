@@ -12,6 +12,7 @@
     xMode: "step",
     smoothing: 0,
     logY: false,
+    theme: "system",
     runFilter: "",
     metricFilter: "",
     wide: new Set(),
@@ -232,6 +233,23 @@ runboard.finish()</pre>`);
       x = idx.map((i) => x[i]);
       y = idx.map((i) => y[i]);
     }
+    if (x.length > 2000) {
+      const bucketSize = Math.ceil(x.length / 500);
+      const indices = [];
+      for (let start = 0; start < x.length; start += bucketSize) {
+        const end = Math.min(x.length, start + bucketSize);
+        let min = start, max = start;
+        for (let i = start + 1; i < end; i++) {
+          if (y[i] != null && (y[min] == null || y[i] < y[min])) min = i;
+          if (y[i] != null && (y[max] == null || y[i] > y[max])) max = i;
+        }
+        for (const i of [start, min, max, end - 1].sort((a, b) => a - b)) {
+          if (indices[indices.length - 1] !== i) indices.push(i);
+        }
+      }
+      x = indices.map((i) => x[i]);
+      y = indices.map((i) => y[i]);
+    }
     return [x, y];
   }
 
@@ -440,15 +458,27 @@ runboard.finish()</pre>`);
     state.xMode = store.get("xmode", "step");
     state.smoothing = store.get("smoothing", 0);
     state.logY = store.get("logy", false);
+    const savedTheme = store.get("theme", "system");
+    state.theme = ["system", "light", "dark"].includes(savedTheme) ? savedTheme : "system";
+    if (state.theme === "light" || state.theme === "dark") document.documentElement.dataset.theme = state.theme;
     $("xmode").value = state.xMode;
     $("smooth").value = state.smoothing;
     $("smooth-val").textContent = state.smoothing;
     $("logy").checked = state.logY;
+    $("theme").textContent = `${state.theme[0].toUpperCase()}${state.theme.slice(1)} theme`;
 
     $("project").onchange = (e) => { state.project = e.target.value || null; store.set("project", state.project); renderRuns(); };
     $("xmode").onchange = (e) => { state.xMode = e.target.value; store.set("xmode", state.xMode); redraw(); };
     $("smooth").oninput = (e) => { state.smoothing = +e.target.value; $("smooth-val").textContent = state.smoothing; store.set("smoothing", state.smoothing); redraw(); };
     $("logy").onchange = (e) => { state.logY = e.target.checked; store.set("logy", state.logY); redraw(); };
+    $("theme").onclick = () => {
+      state.theme = ({ system: "dark", dark: "light", light: "system" })[state.theme];
+      if (state.theme === "system") delete document.documentElement.dataset.theme;
+      else document.documentElement.dataset.theme = state.theme;
+      store.set("theme", state.theme);
+      $("theme").textContent = `${state.theme[0].toUpperCase()}${state.theme.slice(1)} theme`;
+      redraw();
+    };
     $("metric-filter").oninput = (e) => { state.metricFilter = e.target.value; redraw(); };
     $("run-filter").oninput = (e) => { state.runFilter = e.target.value; renderRuns(); };
     $("select-none").onclick = () => { [...state.selected].forEach((k) => select(k, false)); store.set("touched", true); renderRuns(); redraw(); };

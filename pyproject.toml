@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logtool"
+version = "0.1.0"
+description = "Self-hosted live training dashboards for any cluster or VM, viewable without SSH."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+logtool = "logtool.cli:main"
+
+[tool.setuptools]
+packages = ["logtool"]
+
+[tool.setuptools.package-data]
+logtool = ["static/*"]

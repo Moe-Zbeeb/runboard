@@ -12,7 +12,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "runboard"
+      "database_name": "runboard",
+      "database_id": ""
     }
   ],
   "r2_buckets": [

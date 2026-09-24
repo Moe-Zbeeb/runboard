@@ -6,7 +6,7 @@ import time
 import urllib.request
 from datetime import datetime
 
-from . import config
+from . import __version__, config
 from .client import sync
 from .server import Server
 from .storage import Storage
@@ -37,7 +37,14 @@ def _reachable_host():
 def cmd_serve(args):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     token = config.get_or_create_token()
-    srv = Server(args.dir, token, host=args.host, port=args.port).start()
+    try:
+        srv = Server(args.dir, token, host=args.host, port=args.port)
+    except OSError as e:
+        if args.port_explicit:
+            raise SystemExit(f"runboard: cannot bind port {args.port}: {e}")
+        srv = Server(args.dir, token, host=args.host, port=0)
+        print(f"[runboard] port {args.port} busy; using {srv.port}", file=sys.stderr)
+    srv.start()
     advertise = args.advertise or f"http://{_reachable_host()}:{srv.port}"
     config.write_server_info({"url": advertise, "token": token, "dir": str(srv.storage.root)})
     print(f"runboard serving {srv.storage.root}")
@@ -108,7 +115,7 @@ def main(argv=None):
     s = sub.add_parser("serve", help="run the dashboard server")
     s.add_argument("--dir", default="./runboard-runs", help="directory where runs are stored")
     s.add_argument("--host", default="0.0.0.0")
-    s.add_argument("--port", type=int, default=8080)
+    s.add_argument("--port", type=int, default=None)
     s.add_argument("--tunnel", action="store_true", help="expose publicly via a Cloudflare quick tunnel")
     s.add_argument("--advertise", help="URL training jobs use to reach this server")
     s.add_argument("--notify", help="POST the public URL to this webhook (e.g. https://ntfy.sh/<topic>)")
@@ -127,7 +134,11 @@ def main(argv=None):
     s = sub.add_parser("url", help="print the dashboard URL")
     s.set_defaults(func=cmd_url)
 
+    p.add_argument("--version", action="version", version=f"runboard {__version__}")
     args = p.parse_args(argv)
+    if getattr(args, "cmd", None) == "serve":
+        args.port_explicit = args.port is not None
+        args.port = args.port or 8080
     args.func(args)
 
 

@@ -52,7 +52,7 @@
   function ago(t) {
     if (!t) return "";
     const s = Date.now() / 1000 - t;
-    if (s < 60) return `${Math.max(0, Math.round(s))}s ago`;
+    if (s < 60) return "just now";
     if (s < 3600) return `${Math.round(s / 60)}m ago`;
     if (s < 86400) return `${Math.round(s / 3600)}h ago`;
     return `${Math.round(s / 86400)}d ago`;
@@ -110,13 +110,15 @@
       .sort((a, b) => (b.created || 0) - (a.created || 0));
   }
 
+  let lastRunsHtml = "";
   function renderRuns() {
     const ul = $("runs");
+    let html;
     const runs = visibleRuns();
     if (!runs.length) {
-      ul.innerHTML = `<li class="muted">No runs yet.</li>`;
+      html = `<li class="muted">No runs yet.</li>`;
     } else {
-      ul.innerHTML = runs.map((r) => {
+      html = runs.map((r) => {
         const k = key(r);
         const on = state.selected.includes(k);
         const st = statusOf(r);
@@ -130,6 +132,10 @@
           </span>
         </li>`;
       }).join("");
+    }
+    if (html !== lastRunsHtml) {
+      ul.innerHTML = html;
+      lastRunsHtml = html;
     }
     $("sel-count").textContent = `${state.selected.length}/${MAX_SELECTED} shown`;
   }
@@ -161,6 +167,7 @@ runboard.finish()</pre>`);
   }
 
   async function refreshData() {
+    let changed = false;
     await Promise.all(state.selected.map(async (k) => {
       const r = state.runs.get(k);
       if (!r) return;
@@ -169,15 +176,17 @@ runboard.finish()</pre>`);
         d = { offset: 0, t0: null, series: new Map() };
         state.data.set(k, d);
       }
-      for (let guard = 0; guard < 50; guard++) {
+      for (let guard = 0; guard < 1000; guard++) {
         const q = `/api/metrics?project=${encodeURIComponent(r.project)}&run=${encodeURIComponent(r.run_id)}&offset=${d.offset}`;
         const res = await api(q);
+        if (res.rows.length) changed = true;
         ingest(d, res.rows);
         const done = res.offset === d.offset || !res.rows.length;
         d.offset = res.offset;
         if (done) break;
       }
     }));
+    return changed;
   }
 
   function ingest(d, rows) {
@@ -383,13 +392,16 @@ runboard.finish()</pre>`);
   }
 
   let busy = false;
+  let lastRunsSig = "";
   async function poll() {
     if (busy) return;
     busy = true;
     try {
       await refreshRuns();
-      await refreshData();
-      redraw();
+      const changed = await refreshData();
+      const sig = JSON.stringify([...state.runs.values()].map((r) => [key(r), r.status, r.name]));
+      if (changed || sig !== lastRunsSig || !charts.size) redraw();
+      lastRunsSig = sig;
       $("live").classList.remove("error");
       $("live-text").textContent = "live";
     } catch (e) {

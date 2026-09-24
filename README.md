@@ -64,6 +64,11 @@ export RUNBOARD_TOKEN=$(cat ~/.runboard/token)
 ```
 
 Metrics whose names contain `/` are grouped into dashboard sections (`train/…`, `eval/…`).
+
+**Multi-GPU (DDP / torchrun):** only rank 0 logs. On processes where `RANK` or `LOCAL_RANK` is non-zero,
+`init()` and `log()` do nothing, so you can call them everywhere. Pass `all_ranks=True` to override.
+
+**Resuming a run:** pass the same `run_id` to `runboard.init(..., run_id="my-run")` to keep appending to it.
 Runs record host, argv, `SLURM_JOB_ID`, and status (`running` / `finished` / `crashed`).
 
 ### Shared-filesystem mode (most robust on clusters)
@@ -77,6 +82,8 @@ runboard.init(project="resnet", dir="~/runboard-runs")   # or export RUNBOARD_DI
 
 ### Offline / server down
 
+Logging is fire-and-forget: `log()` only appends to memory (~15 µs), and a background thread sends batches.
+Delivery is exactly-once: rows carry sequence numbers, so a batch resent after a dropped connection is not duplicated.
 If the server is unreachable, rows are buffered in memory and retried. Rows still unsent when the job exits are
 saved to `~/.runboard/spool/`. Upload them later with:
 

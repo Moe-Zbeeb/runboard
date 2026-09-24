@@ -157,3 +157,104 @@ def test_buffer_survives_server_outage(tmp_path):
         assert [r["loss"] for r in rows] == [1.0, 0.5]
     finally:
         srv2.stop()
+
+
+def test_large_backlog_is_sent_in_chunks(server):
+    run = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=60, chunk_size=7)
+    for i in range(100):
+        run.log({"v": i})
+    run.finish()
+    rows, _ = server.storage.read_rows("p", run.run_id)
+    assert [r["v"] for r in rows] == list(range(100))
+    assert server.storage.read_meta("p", run.run_id)["status"] == "finished"
+
+
+def test_rejected_rows_are_dropped_not_retried_forever(server, monkeypatch):
+    import runboard.server as srvmod
+
+    monkeypatch.setattr(srvmod, "MAX_BODY", 200)
+    run = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=60, chunk_size=1000)
+    for i in range(50):
+        run.log({"v": i})
+    t0 = time.time()
+    run.finish(timeout=5)
+    assert time.time() - t0 < 5
+    assert not list((config.home() / "spool").glob("*.jsonl"))
+
+
+def test_nonzero_rank_is_noop(server, monkeypatch):
+    monkeypatch.setenv("RANK", "3")
+    run = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=0.05)
+    run.log({"v": 1})
+    run.finish()
+    assert run.mode == "disabled"
+    assert server.storage.list_runs() == []
+
+
+def test_read_rows_pages_large_files(tmp_path):
+    s = Storage(tmp_path)
+    s.append_rows("p", "r", [{"_step": i, "v": i} for i in range(1000)])
+    got, off = [], 0
+    while True:
+        rows, new = s.read_rows("p", "r", off, max_bytes=500)
+        got += rows
+        if new == off:
+            break
+        off = new
+    assert [r["v"] for r in got] == list(range(1000))
+
+
+def test_sync_chunks_large_spool(tmp_path):
+    run = Run("p", server="http://127.0.0.1:9", token="secret", flush_interval=60)
+    for i in range(12000):
+        run.log({"v": i})
+    run.finish(timeout=0.1)
+    srv = Server(tmp_path / "runs3", "secret", host="127.0.0.1", port=0).start()
+    try:
+        assert sync(server=f"http://127.0.0.1:{srv.port}", token="secret") == 12000
+        rows, _ = srv.storage.read_rows("p", run.run_id, max_bytes=10**9)
+        assert len(rows) == 12000
+    finally:
+        srv.stop()
+
+
+def test_resent_rows_are_deduplicated(tmp_path):
+    s = Storage(tmp_path)
+    batch = [{"_sid": "a", "_seq": i, "_step": i, "v": i} for i in range(10)]
+    s.append_rows("p", "r", batch)
+    s.append_rows("p", "r", batch[5:] + [{"_sid": "a", "_seq": 10, "_step": 10, "v": 10}])
+    s2 = Storage(tmp_path)
+    s2.append_rows("p", "r", batch)
+    rows, _ = s2.read_rows("p", "r")
+    assert [r["v"] for r in rows] == list(range(11))
+
+
+def test_resumed_run_with_same_id_is_not_dropped(server):
+    url = f"http://127.0.0.1:{server.port}"
+    for part in range(2):
+        run = Run("p", run_id="resume-me", server=url, token="secret", flush_interval=0.05)
+        for i in range(5):
+            run.log({"v": part * 5 + i}, step=part * 5 + i)
+        run.finish()
+    rows, _ = server.storage.read_rows("p", "resume-me")
+    assert [r["v"] for r in rows] == list(range(10))
+
+
+def test_unexpected_send_errors_never_reach_user_code(tmp_path):
+    import http.client
+
+    class Flaky:
+        calls = 0
+
+        def send(self, project, run_id, meta, rows):
+            Flaky.calls += 1
+            if Flaky.calls <= 2:
+                raise http.client.IncompleteRead(b"", 10)
+            self.got = rows
+
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=0.05)
+    sink = Flaky()
+    run._sink = sink
+    run.log({"v": 1})
+    run.finish(timeout=5)
+    assert [r["v"] for r in sink.got] == [1]

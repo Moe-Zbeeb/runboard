@@ -38,7 +38,7 @@ def clean_row(row):
     for k, v in row.items():
         if not isinstance(k, str):
             continue
-        if k in ("_step", "_time"):
+        if k in ("_step", "_time", "_seq", "_sid"):
             out[k] = v
             continue
         c = clean_value(v)
@@ -47,10 +47,31 @@ def clean_row(row):
     return out
 
 
+def _tail_seq(path):
+    none = (None, -1)
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 65536))
+            data = f.read()
+    except OSError:
+        return none
+    for line in reversed(data.splitlines()):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("_seq"), int):
+            return row.get("_sid"), row["_seq"]
+    return none
+
+
 class Storage:
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._last_seq = {}
 
     def run_dir(self, project, run_id):
         if not (valid_name(project) and valid_name(run_id)):
@@ -84,12 +105,23 @@ class Storage:
         if not (d / "meta.json").exists():
             self.update_meta(project, run_id, {})
         p = d / "metrics.jsonl"
-        lines = "".join(json.dumps(clean_row(r)) + "\n" for r in rows if isinstance(r, dict))
-        if not lines:
-            return
         with _lock_for(p):
+            sid, last = self._last_seq.get(p) or _tail_seq(p)
+            out = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                seq = r.get("_seq")
+                if isinstance(seq, int):
+                    if r.get("_sid") == sid and seq <= last:
+                        continue
+                    sid, last = r.get("_sid"), seq
+                out.append(json.dumps(clean_row(r)) + "\n")
+            self._last_seq[p] = (sid, last)
+            if not out:
+                return
             with open(p, "a") as f:
-                f.write(lines)
+                f.write("".join(out))
 
     def read_meta(self, project, run_id):
         p = self.run_dir(project, run_id) / "meta.json"
@@ -98,13 +130,13 @@ class Storage:
         except (OSError, ValueError):
             return None
 
-    def read_rows(self, project, run_id, offset=0):
+    def read_rows(self, project, run_id, offset=0, max_bytes=8 * 1024 * 1024):
         p = self.run_dir(project, run_id) / "metrics.jsonl"
         if not p.exists():
             return [], 0
         with open(p, "rb") as f:
             f.seek(offset)
-            data = f.read()
+            data = f.read(max_bytes)
         end = data.rfind(b"\n")
         if end < 0:
             return [], offset

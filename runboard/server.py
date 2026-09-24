@@ -75,11 +75,12 @@ def make_handler(storage, token):
             url = urlparse(self.path)
             path = url.path
             if path == "/" and "token" in self._query():
+                secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
                 return self._send(
                     302,
                     headers={
                         "Location": "/",
-                        "Set-Cookie": f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000",
+                        "Set-Cookie": f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000{secure}",
                     },
                 )
             if path == "/":

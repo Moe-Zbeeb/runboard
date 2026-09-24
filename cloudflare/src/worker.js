@@ -1,6 +1,6 @@
 const COOKIE = "runboard_token";
 const NAME = /^[A-Za-z0-9._-]{1,128}$/;
-const MAX_BODY = 8 * 1024 * 1024;
+const MAX_BODY = 1500000;
 
 let schemaReady;
 
@@ -57,7 +57,7 @@ function ensureSchema(env) {
   if (!schemaReady) {
     schemaReady = env.DB.batch([
       env.DB.prepare("CREATE TABLE IF NOT EXISTS runs (project TEXT NOT NULL, run_id TEXT NOT NULL, name TEXT NOT NULL, meta TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, PRIMARY KEY (project, run_id))"),
-      env.DB.prepare("CREATE TABLE IF NOT EXISTS metric_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, run_id TEXT NOT NULL, object_key TEXT NOT NULL, row_count INTEGER NOT NULL, created REAL NOT NULL, batch_key TEXT NOT NULL UNIQUE)"),
+      env.DB.prepare("CREATE TABLE IF NOT EXISTS metric_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, run_id TEXT NOT NULL, rows_json TEXT NOT NULL, row_count INTEGER NOT NULL, created REAL NOT NULL, batch_key TEXT NOT NULL UNIQUE)"),
       env.DB.prepare("CREATE INDEX IF NOT EXISTS runs_created ON runs (created DESC)"),
       env.DB.prepare("CREATE INDEX IF NOT EXISTS metric_batches_run ON metric_batches (project, run_id, id)"),
     ]).catch((error) => {
@@ -139,12 +139,10 @@ async function postRun(request, env, project, runId) {
   const updated = rows.reduce((latest, row) => Math.max(latest, Number(row._time) || 0), Date.now() / 1000);
   if (rows.length) {
     const batchKey = await hashRows(project, runId, rows);
-    const objectKey = `metrics/${project}/${runId}/${batchKey}.json`;
     const exists = await env.DB.prepare("SELECT 1 FROM metric_batches WHERE batch_key = ?").bind(batchKey).first();
     if (!exists) {
-      await env.METRICS.put(objectKey, JSON.stringify(rows), { httpMetadata: { contentType: "application/json" } });
-      await env.DB.prepare("INSERT OR IGNORE INTO metric_batches (project, run_id, object_key, row_count, created, batch_key) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(project, runId, objectKey, rows.length, updated, batchKey)
+      await env.DB.prepare("INSERT OR IGNORE INTO metric_batches (project, run_id, rows_json, row_count, created, batch_key) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(project, runId, JSON.stringify(rows), rows.length, updated, batchKey)
         .run();
     }
   }
@@ -173,15 +171,13 @@ async function getMetrics(env, url) {
   if (!validName(project) || !validName(runId) || !Number.isSafeInteger(rawOffset) || rawOffset < 0) {
     return response({ error: "invalid project, run, or offset" }, 400);
   }
-  const batch = await env.DB.prepare("SELECT id, object_key FROM metric_batches WHERE project = ? AND run_id = ? AND id > ? ORDER BY id LIMIT 1")
+  const batch = await env.DB.prepare("SELECT id, rows_json FROM metric_batches WHERE project = ? AND run_id = ? AND id > ? ORDER BY id LIMIT 1")
     .bind(project, runId, rawOffset)
     .first();
   if (!batch) return response({ rows: [], offset: rawOffset });
-  const object = await env.METRICS.get(batch.object_key);
-  if (!object) return response({ rows: [], offset: batch.id });
   let rows = [];
   try {
-    rows = JSON.parse(await object.text());
+    rows = JSON.parse(batch.rows_json);
   } catch {
     rows = [];
   }

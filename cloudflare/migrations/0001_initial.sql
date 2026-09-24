@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS metric_batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project TEXT NOT NULL,
   run_id TEXT NOT NULL,
-  object_key TEXT NOT NULL,
+  rows_json TEXT NOT NULL,
   row_count INTEGER NOT NULL,
   created REAL NOT NULL,
   batch_key TEXT NOT NULL UNIQUE

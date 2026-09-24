@@ -26,7 +26,7 @@ their own Cloudflare account. Training jobs send metrics directly over HTTPS, so
 need to host a server and the dashboard keeps the same URL when jobs, login nodes, or laptops restart.
 
 - **Two lines in your training code.** `runboard.init(...)` and `runboard.log({...})`.
-- **Bring your own Cloudflare.** One click creates a Worker, D1 database, R2 bucket, and static dashboard
+- **Bring your own Cloudflare.** One click creates a Worker, D1 database, and static dashboard
   in your account. No domain or always-on cluster process is required.
 - **One stable URL.** Jobs and browsers connect to the same `workers.dev` HTTPS endpoint from anywhere.
 - **Zero dependencies.** The client, server, and dashboard use only the Python standard library.
@@ -54,7 +54,7 @@ need to host a server and the dashboard keeps the same URL when jobs, login node
 ## Quickstart
 
 **1. Deploy your personal backend.** Click the button, sign in to Cloudflare, and choose a long random
-`RUNBOARD_TOKEN` when prompted. Cloudflare creates the Worker, database, metric bucket, and dashboard.
+`RUNBOARD_TOKEN` when prompted. Cloudflare creates the Worker, database, and dashboard.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Moe-Zbeeb/runboard/tree/main/cloudflare)
 
@@ -99,16 +99,16 @@ configure it once and every compute node uses it. For containers or separate mac
   cluster / VM                         your Cloudflare account                 anywhere
  ┌──────────────────┐    HTTPS    ┌───────────────────────────────┐        ┌───────────┐
  │ train.py         │ ──────────► │ Worker: auth + REST API       │ ◄────► │  browser  │
- │   runboard.log() │             │ D1: runs + batch index        │ HTTPS  │ dashboard │
- │   retry + spool  │             │ R2: metric batches            │        └───────────┘
- └──────────────────┘             │ Assets: dashboard             │
+ │   runboard.log() │             │ D1: runs + metric batches     │ HTTPS  │ dashboard │
+ │   retry + spool  │             │ Assets: dashboard             │        └───────────┘
+ └──────────────────┘             │                               │
                                   └───────────────────────────────┘
 ```
 
 1. Your script appends metrics to an in-memory buffer. A background thread sends them to the
    server once per second, in chunks of up to 5,000 rows.
-2. The Cloudflare Worker authenticates the request, stores run metadata and its metric-batch index in
-   D1, and stores metric payloads in R2. Retried batches have deterministic IDs and are stored once.
+2. The Cloudflare Worker authenticates the request and stores run metadata and metric batches in D1.
+   Retried batches have deterministic IDs and are stored once.
 3. The dashboard is served by the same Worker. It polls every two seconds and fetches only batches it
    has not seen.
 4. If Cloudflare or the network is unavailable, the client retries with backoff and writes remaining
@@ -180,12 +180,11 @@ The Worker creates its schema on the first authenticated request. The SQL migrat
 `cloudflare/migrations/` for inspection and future upgrades.
 
 For local Worker development, copy `.dev.vars.example` to `.dev.vars`, replace its value, and run
-`npm run dev`. Wrangler keeps local D1 and R2 data under `.wrangler/`.
+`npm run dev`. Wrangler keeps local D1 data under `.wrangler/`.
 
 Cloudflare's free plan is enough for personal use and normal research runs, subject to its current
 [Workers](https://developers.cloudflare.com/workers/platform/pricing/),
-[D1](https://developers.cloudflare.com/d1/platform/pricing/), and
-[R2](https://developers.cloudflare.com/r2/pricing/) quotas. Large sweeps or very frequent logging can
+[D1](https://developers.cloudflare.com/d1/platform/pricing/) quotas. Large sweeps or very frequent logging can
 exceed those quotas. Runboard batches writes, but log at a useful interval instead of every inner-loop
 operation.
 
@@ -286,8 +285,8 @@ or set `export RUNBOARD_DIR=~/runboard-runs` in your job script. The server pick
 - Every request, including the dashboard itself, needs the access token. For Cloudflare, each user
   chooses it during deployment and stores it as a Worker secret. The local server generates one.
 - Opening `/?token=…` stores the token in an `HttpOnly` cookie and removes it from the address bar.
-- The hosted endpoint uses HTTPS. Run metadata is stored in D1 and metric batches in R2 inside the
-  user's Cloudflare account.
+- The hosted endpoint uses HTTPS. Run metadata and metric batches are stored in D1 inside the user's
+  Cloudflare account.
 - **Anyone with the URL and the token can read your metrics.** Treat the full URL like a password. To
   rotate a Cloudflare token, run `npx wrangler secret put RUNBOARD_TOKEN` from the repository and
   re-run `runboard configure`. For a local server, delete `~/.runboard/token` and restart it.

@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Personal Cloudflare backend with a Worker API, D1 run index, R2 metric storage, and bundled dashboard.
+- Personal Cloudflare backend with a Worker API, D1 run and metric storage, and bundled dashboard.
 - One-click deploy configuration with automatic per-account resource provisioning.
 - `runboard configure` to verify and save a hosted endpoint securely.
 

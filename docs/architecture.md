@@ -10,7 +10,7 @@ runboard has a dependency-free Python client, two interchangeable backends, and 
 | `tunnel.py` | Finds or downloads `cloudflared`, runs a quick tunnel, reports the public URL |
 | `cli.py` | `runboard configure / serve / ls / sync / url` |
 | `static/` | The dashboard: `index.html`, `app.js`, `style.css`, bundled uPlot |
-| `cloudflare/src/worker.js` | Hosted REST API, authentication, D1 index, R2 metric storage, static assets |
+| `cloudflare/src/worker.js` | Hosted REST API, authentication, D1 storage, static assets |
 
 ## Design constraints
 
@@ -25,16 +25,16 @@ runboard has a dependency-free Python client, two interchangeable backends, and 
 
 ## Cloudflare storage
 
-D1 contains run metadata and an ordered index of metric batches. R2 contains the JSON payload for each
-batch. Keeping metric arrays in R2 avoids creating one database write per training step and avoids
-database row-size pressure for wide experiments.
+D1 contains run metadata and JSON metric batches. The Worker limits requests to 1.5 MB, and the Python
+client automatically splits larger batches when it receives HTTP 413. This stays below D1's 2 MB row
+limit while retaining one database write for thousands of training steps.
 
-Each metric batch receives a SHA-256 key derived from its project, run, and rows. A retry writes the
-same R2 object and `INSERT OR IGNORE` keeps one D1 index record. The browser treats the D1 batch ID as
-its incremental offset and downloads one new batch at a time.
+Each metric batch receives a SHA-256 key derived from its project, run, and rows. `INSERT OR IGNORE`
+keeps one D1 record for repeated delivery. The browser treats the D1 batch ID as its incremental offset
+and downloads one new batch at a time.
 
-The Worker creates the schema with idempotent DDL when its first authenticated request arrives. D1,
-R2, and static assets are declared without account-specific IDs in `wrangler.jsonc`, allowing Wrangler
+The Worker creates the schema with idempotent DDL when its first authenticated request arrives. D1 and
+static assets are declared without account-specific IDs in `wrangler.jsonc`, allowing Wrangler
 and the Cloudflare deploy button to provision separate resources for every user.
 
 ## Local storage layout

@@ -28,7 +28,7 @@ def init(project="default", name=None, config=None, **kwargs):
 
 def log(data, step=None):
     if run is None:
-        raise RuntimeError("call logtool.init() first")
+        raise RuntimeError("call runboard.init() first")
     run.log(data, step=step)
 
 

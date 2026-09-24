@@ -5,17 +5,17 @@ import urllib.request
 
 import pytest
 
-import logtool
-from logtool import config
-from logtool.client import Run, sync
-from logtool.server import Server
-from logtool.storage import Storage
+import runboard
+from runboard import config
+from runboard.client import Run, sync
+from runboard.server import Server
+from runboard.storage import Storage
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOGTOOL_HOME", str(tmp_path / "home"))
-    for k in ("LOGTOOL_SERVER", "LOGTOOL_TOKEN", "LOGTOOL_DIR"):
+    monkeypatch.setenv("RUNBOARD_HOME", str(tmp_path / "home"))
+    for k in ("RUNBOARD_SERVER", "RUNBOARD_TOKEN", "RUNBOARD_DIR"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.chdir(tmp_path)
 
@@ -105,10 +105,10 @@ def test_client_http_mode(server):
 
 def test_client_discovers_server_from_config(server):
     config.write_server_info({"url": f"http://127.0.0.1:{server.port}", "token": "secret"})
-    r = logtool.init("auto", flush_interval=0.05)
+    r = runboard.init("auto", flush_interval=0.05)
     assert r.mode == "http"
-    logtool.log({"x": 1})
-    logtool.finish()
+    runboard.log({"x": 1})
+    runboard.finish()
     assert wait_for(lambda: server.storage.read_rows("auto", r.run_id)[0])
 
 

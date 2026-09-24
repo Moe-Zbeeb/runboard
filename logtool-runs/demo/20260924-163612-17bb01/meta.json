@@ -1,0 +1,1 @@
+{"name": "lr=0.0005", "config": {"lr": 0.0005, "batch_size": 64, "model": "mlp"}, "tags": [], "status": "finished", "created": 1790256972.4083781, "host": "zbeebBook-5.local", "argv": ["examples/train_demo.py", "5e-4", "3000"], "slurm_job_id": null, "mode": "file", "project": "demo", "run_id": "20260924-163612-17bb01", "finished": 1790256993.680196}

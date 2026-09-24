@@ -16,7 +16,7 @@ from .storage import Storage, clean_row, valid_name
 
 
 def _warn(msg):
-    print(f"[logtool] {msg}", file=sys.stderr, flush=True)
+    print(f"[runboard] {msg}", file=sys.stderr, flush=True)
 
 
 def _sanitize(name):
@@ -105,24 +105,24 @@ class Run:
             slurm_job_id=os.environ.get("SLURM_JOB_ID"),
             mode=self.mode,
         )
-        self._thread = threading.Thread(target=self._loop, name="logtool-sender", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name="runboard-sender", daemon=True)
         self._thread.start()
         atexit.register(self.finish)
 
     def _resolve_sink(self, server, token, dir, mode):
-        dir = dir or os.environ.get("LOGTOOL_DIR")
+        dir = dir or os.environ.get("RUNBOARD_DIR")
         if mode == "file" or (mode is None and dir):
-            root = dir or "./logtool-runs"
+            root = dir or "./runboard-runs"
             return _FileSink(root), "file"
         info = _config.read_server_info()
-        server = server or os.environ.get("LOGTOOL_SERVER") or info.get("url")
-        token = token or os.environ.get("LOGTOOL_TOKEN") or info.get("token")
+        server = server or os.environ.get("RUNBOARD_SERVER") or info.get("url")
+        token = token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
         if server and token:
             return _HttpSink(server, token), "http"
         if mode == "http":
-            raise ValueError("http mode needs a server and token (args, LOGTOOL_SERVER/LOGTOOL_TOKEN, or `logtool serve`)")
-        _warn("no server found; writing to ./logtool-runs (run `logtool serve --dir ./logtool-runs` to view)")
-        return _FileSink("./logtool-runs"), "file"
+            raise ValueError("http mode needs a server and token (args, RUNBOARD_SERVER/RUNBOARD_TOKEN, or `runboard serve`)")
+        _warn("no server found; writing to ./runboard-runs (run `runboard serve --dir ./runboard-runs` to view)")
+        return _FileSink("./runboard-runs"), "file"
 
     def _set_meta(self, **kw):
         with self._lock:
@@ -202,7 +202,7 @@ class Run:
             time.sleep(1.0)
         meta, rows = self._take()
         p = self._spool(meta, rows)
-        _warn(f"server unreachable; {len(rows)} rows saved to {p}. Upload later with `logtool sync`.")
+        _warn(f"server unreachable; {len(rows)} rows saved to {p}. Upload later with `runboard sync`.")
 
     def __enter__(self):
         return self
@@ -213,8 +213,8 @@ class Run:
 
 def sync(server=None, token=None, paths=None):
     info = _config.read_server_info()
-    server = server or os.environ.get("LOGTOOL_SERVER") or info.get("url")
-    token = token or os.environ.get("LOGTOOL_TOKEN") or info.get("token")
+    server = server or os.environ.get("RUNBOARD_SERVER") or info.get("url")
+    token = token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
     if not (server and token):
         raise ValueError("no server/token configured")
     files = [Path(p) for p in paths] if paths else sorted(spool_dir().glob("*.jsonl"))

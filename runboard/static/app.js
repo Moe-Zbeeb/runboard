@@ -20,8 +20,8 @@
   const $ = (id) => document.getElementById(id);
 
   const store = {
-    get(k, d) { try { const v = localStorage.getItem("logtool:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem("logtool:" + k, JSON.stringify(v)); } catch {} },
+    get(k, d) { try { const v = localStorage.getItem("runboard:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("runboard:" + k, JSON.stringify(v)); } catch {} },
   };
 
   const key = (r) => `${r.project}/${r.run_id}`;
@@ -150,11 +150,11 @@
     renderProjects();
     renderRuns();
     if (!list.length) {
-      setMessage(`No runs yet. In your training script:<pre>import logtool
-logtool.init(project="my-project", config={"lr": 3e-4})
+      setMessage(`No runs yet. In your training script:<pre>import runboard
+runboard.init(project="my-project", config={"lr": 3e-4})
 for step in range(1000):
-    logtool.log({"train/loss": loss}, step=step)
-logtool.finish()</pre>`);
+    runboard.log({"train/loss": loss}, step=step)
+runboard.finish()</pre>`);
     } else {
       setMessage("");
     }
@@ -395,7 +395,7 @@ logtool.finish()</pre>`);
     } catch (e) {
       $("live").classList.add("error");
       $("live-text").textContent = e.message === "unauthorized" ? "unauthorized" : "reconnecting…";
-      if (e.message === "unauthorized") setMessage("Unauthorized. Open the full URL printed by <code>logtool serve</code> (ending in <code>?token=…</code>).");
+      if (e.message === "unauthorized") setMessage("Unauthorized. Open the full URL printed by <code>runboard serve</code> (ending in <code>?token=…</code>).");
     } finally {
       busy = false;
     }

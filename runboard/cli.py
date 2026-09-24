@@ -16,7 +16,7 @@ def _notify(url, text):
     try:
         urllib.request.urlopen(urllib.request.Request(url, data=text.encode(), method="POST"), timeout=10).close()
     except OSError as e:
-        print(f"[logtool] notify failed: {e}", file=sys.stderr)
+        print(f"[runboard] notify failed: {e}", file=sys.stderr)
 
 
 def _reachable_host():
@@ -40,7 +40,7 @@ def cmd_serve(args):
     srv = Server(args.dir, token, host=args.host, port=args.port).start()
     advertise = args.advertise or f"http://{_reachable_host()}:{srv.port}"
     config.write_server_info({"url": advertise, "token": token, "dir": str(srv.storage.root)})
-    print(f"logtool serving {srv.storage.root}")
+    print(f"runboard serving {srv.storage.root}")
     print(f"  local:   http://127.0.0.1:{srv.port}/?token={token}")
     print(f"  cluster: {advertise}/?token={token}")
     print(f"  (training jobs pick up the server from {config.home() / 'server.json'})")
@@ -60,7 +60,7 @@ def cmd_serve(args):
         info["public_url"] = public
         config.write_server_info(info)
         if args.notify:
-            _notify(args.notify, f"logtool dashboard: {public}")
+            _notify(args.notify, f"runboard dashboard: {public}")
         return t
 
     try:
@@ -69,11 +69,11 @@ def cmd_serve(args):
         while True:
             time.sleep(5)
             if tunnel and tunnel.proc.poll() is not None:
-                print("[logtool] tunnel exited; restarting", file=sys.stderr, flush=True)
+                print("[runboard] tunnel exited; restarting", file=sys.stderr, flush=True)
                 try:
                     tunnel = open_tunnel()
                 except RuntimeError as e:
-                    print(f"[logtool] {e}; retrying in 30s", file=sys.stderr, flush=True)
+                    print(f"[runboard] {e}; retrying in 30s", file=sys.stderr, flush=True)
                     time.sleep(30)
     except KeyboardInterrupt:
         pass
@@ -102,11 +102,11 @@ def cmd_url(args):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="logtool", description="Live training dashboards for any cluster.")
+    p = argparse.ArgumentParser(prog="runboard", description="Live training dashboards for any cluster.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve", help="run the dashboard server")
-    s.add_argument("--dir", default="./logtool-runs", help="directory where runs are stored")
+    s.add_argument("--dir", default="./runboard-runs", help="directory where runs are stored")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8080)
     s.add_argument("--tunnel", action="store_true", help="expose publicly via a Cloudflare quick tunnel")
@@ -115,7 +115,7 @@ def main(argv=None):
     s.set_defaults(func=cmd_serve)
 
     s = sub.add_parser("ls", help="list runs")
-    s.add_argument("--dir", default="./logtool-runs")
+    s.add_argument("--dir", default="./runboard-runs")
     s.set_defaults(func=cmd_ls)
 
     s = sub.add_parser("sync", help="upload spooled offline metrics")

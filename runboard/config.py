@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def home():
-    return Path(os.environ.get("LOGTOOL_HOME", "~/.logtool")).expanduser()
+    return Path(os.environ.get("RUNBOARD_HOME", "~/.runboard")).expanduser()
 
 
 def get_or_create_token():

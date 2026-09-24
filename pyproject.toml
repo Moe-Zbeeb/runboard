@@ -1,23 +1,38 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "logtool"
+name = "runboard"
 version = "0.1.0"
-description = "Self-hosted live training dashboards for any cluster or VM, viewable without SSH."
+description = "Self-hosted, W&B-style live training dashboards for any cluster or VM, viewable in your browser without SSH."
 readme = "README.md"
 requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Mohammad Zbeeb", email = "mhmdzbyb829@gmail.com" }]
+keywords = ["machine-learning", "experiment-tracking", "training", "dashboard", "metrics", "slurm", "cluster", "wandb"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Monitoring",
+]
 dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest"]
 
 [project.scripts]
-logtool = "logtool.cli:main"
+runboard = "runboard.cli:main"
 
 [tool.setuptools]
-packages = ["logtool"]
+packages = ["runboard"]
 
 [tool.setuptools.package-data]
-logtool = ["static/*"]
+runboard = ["static/*"]

@@ -10,12 +10,12 @@ from .storage import Storage
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_BODY = 64 * 1024 * 1024
-COOKIE = "logtool_token"
+COOKIE = "runboard_token"
 
 
 def make_handler(storage, token):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "logtool"
+        server_version = "runboard"
         protocol_version = "HTTP/1.1"
 
         def log_message(self, fmt, *args):
@@ -61,7 +61,7 @@ def make_handler(storage, token):
             else:
                 self._send(
                     401,
-                    "<h3>logtool: unauthorized</h3><p>Open the URL printed by <code>logtool serve</code> "
+                    "<h3>runboard: unauthorized</h3><p>Open the URL printed by <code>runboard serve</code> "
                     "(it ends with <code>?token=...</code>).</p>",
                     "text/html; charset=utf-8",
                 )

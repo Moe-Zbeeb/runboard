@@ -14,7 +14,7 @@ URL_RE = re.compile(r"https://[-a-z0-9]+\.trycloudflare\.com")
 
 
 def cache_dir():
-    return Path(os.environ.get("XDG_CACHE_HOME", "~/.cache")).expanduser() / "logtool"
+    return Path(os.environ.get("XDG_CACHE_HOME", "~/.cache")).expanduser() / "runboard"
 
 
 def _asset():
@@ -35,7 +35,7 @@ def find_or_install():
         return str(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     asset = _asset()
-    print(f"[logtool] downloading {asset} ...", file=sys.stderr, flush=True)
+    print(f"[runboard] downloading {asset} ...", file=sys.stderr, flush=True)
     tmp = target.parent / (asset + ".part")
     urllib.request.urlretrieve(RELEASE + asset, tmp)
     if asset.endswith(".tgz"):

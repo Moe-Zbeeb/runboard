@@ -1,4 +1,4 @@
-# logtool
+# runboard
 
 Self-hosted, W&B-style live training dashboards for **any cluster or VM** you can log into.
 You view them in your browser from anywhere, with no SSH connection or port forwarding.
@@ -11,17 +11,17 @@ You view them in your browser from anywhere, with no SSH connection or port forw
 ## Install (on the cluster / VM)
 
 ```bash
-pip install git+<this repo>        # or: pip install -e .
+pip install runboard
 ```
 
 ## 1. Start the server (once)
 
 ```bash
-logtool serve --dir ~/logtool-runs --tunnel
+runboard serve --dir ~/runboard-runs --tunnel
 ```
 
 ```
-logtool serving /home/you/logtool-runs
+runboard serving /home/you/runboard-runs
   local:   http://127.0.0.1:8080/?token=...
   cluster: http://login-node-3:8080/?token=...
   public:  https://some-words.trycloudflare.com/?token=...
@@ -29,32 +29,38 @@ logtool serving /home/you/logtool-runs
 
 Open the **public** URL in your browser and bookmark it. The token is stored in a cookie, so later visits work too.
 
-Keep the server running with `tmux`/`nohup` on a login node, or as a Slurm job (`sbatch examples/serve.sbatch`).
+Keep the server running with `tmux`/`nohup` on a login node, or as a long Slurm job:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=runboard --cpus-per-task=1 --mem=1G --time=7-00:00:00
+runboard serve --dir "$HOME/runboard-runs" --tunnel --notify https://ntfy.sh/<your-private-topic>
+```
 
 **Get the URL on your phone without SSH:** the tunnel URL changes whenever the server restarts.
 Add `--notify https://ntfy.sh/<some-private-topic>` and every new URL is pushed to the ntfy app.
-`logtool url` also prints the current URL.
+`runboard url` also prints the current URL.
 
 ## 2. Log from your training code
 
 ```python
-import logtool
+import runboard
 
-logtool.init(project="resnet", name="lr3e-4", config={"lr": 3e-4, "bs": 256})
+runboard.init(project="resnet", name="lr3e-4", config={"lr": 3e-4, "bs": 256})
 for step in range(num_steps):
     ...
-    logtool.log({"train/loss": loss, "train/lr": lr}, step=step)
+    runboard.log({"train/loss": loss, "train/lr": lr}, step=step)
     if step % 500 == 0:
-        logtool.log({"eval/acc": acc}, step=step)
-logtool.finish()
+        runboard.log({"eval/acc": acc}, step=step)
+runboard.finish()
 ```
 
-`logtool.init()` finds the server automatically through `~/.logtool/server.json`, which `logtool serve` writes.
+`runboard.init()` finds the server automatically through `~/.runboard/server.json`, which `runboard serve` writes.
 Home directories are shared across nodes on most clusters. Otherwise set:
 
 ```bash
-export LOGTOOL_SERVER=http://login-node-3:8080
-export LOGTOOL_TOKEN=$(cat ~/.logtool/token)
+export RUNBOARD_SERVER=http://login-node-3:8080
+export RUNBOARD_TOKEN=$(cat ~/.runboard/token)
 ```
 
 Metrics whose names contain `/` are grouped into dashboard sections (`train/…`, `eval/…`).
@@ -66,16 +72,16 @@ If compute nodes can't reach the server's host over the network, write to a shar
 The server reads it directly:
 
 ```python
-logtool.init(project="resnet", dir="~/logtool-runs")   # or export LOGTOOL_DIR=~/logtool-runs
+runboard.init(project="resnet", dir="~/runboard-runs")   # or export RUNBOARD_DIR=~/runboard-runs
 ```
 
 ### Offline / server down
 
 If the server is unreachable, rows are buffered in memory and retried. Rows still unsent when the job exits are
-saved to `~/.logtool/spool/`. Upload them later with:
+saved to `~/.runboard/spool/`. Upload them later with:
 
 ```bash
-logtool sync
+runboard sync
 ```
 
 ## Dashboard
@@ -90,13 +96,17 @@ logtool sync
 
 | command | |
 |---|---|
-| `logtool serve [--dir D] [--port P] [--tunnel] [--notify URL] [--advertise URL]` | run the server |
-| `logtool ls [--dir D]` | list runs |
-| `logtool sync [files…]` | upload spooled metrics |
-| `logtool url` | print the dashboard URL |
+| `runboard serve [--dir D] [--port P] [--tunnel] [--notify URL] [--advertise URL]` | run the server |
+| `runboard ls [--dir D]` | list runs |
+| `runboard sync [files…]` | upload spooled metrics |
+| `runboard url` | print the dashboard URL |
 
 ## Security
 
-Anyone with the URL **and** the token can view your metrics. The token lives in `~/.logtool/token` (mode 600).
+Anyone with the URL **and** the token can view your metrics. The token lives in `~/.runboard/token` (mode 600).
 Delete that file and restart the server to rotate it. Traffic through the tunnel is HTTPS, and Cloudflare relays it
 without storing it.
+
+## License
+
+MIT. Bundles [uPlot](https://github.com/leeoniya/uPlot) (MIT).

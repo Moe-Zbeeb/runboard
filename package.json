@@ -10,18 +10,5 @@
   },
   "devDependencies": {
     "wrangler": "^4.45.0"
-  },
-  "cloudflare": {
-    "bindings": {
-      "RUNBOARD_TOKEN": {
-        "description": "Choose a long random access token. Generate one with `python -c 'import secrets; print(secrets.token_urlsafe(32))'`."
-      },
-      "DB": {
-        "description": "Stores run metadata and the ordered metric-batch index."
-      },
-      "METRICS": {
-        "description": "Stores batched experiment metrics in your account."
-      }
-    }
   }
 }

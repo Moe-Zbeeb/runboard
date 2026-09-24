@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,6 @@ description = "Self-hosted, W&B-style live training dashboards for any cluster o
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
-license-files = ["LICENSE"]
 authors = [{ name = "Mohammad Zbeeb", email = "mhmdzbyb829@gmail.com" }]
 keywords = ["machine-learning", "experiment-tracking", "training", "dashboard", "metrics", "slurm", "cluster", "wandb"]
 classifiers = [

@@ -11,12 +11,14 @@
   },
   "d1_databases": [
     {
-      "binding": "DB"
+      "binding": "DB",
+      "database_name": "runboard"
     }
   ],
   "r2_buckets": [
     {
-      "binding": "METRICS"
+      "binding": "METRICS",
+      "bucket_name": "runboard-metrics"
     }
   ]
 }

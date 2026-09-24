@@ -137,7 +137,7 @@
       ul.innerHTML = html;
       lastRunsHtml = html;
     }
-    $("sel-count").textContent = `${state.selected.length}/${MAX_SELECTED} shown`;
+    $("sel-count").textContent = `${state.selected.length} selected (max ${MAX_SELECTED})`;
   }
 
   async function refreshRuns() {
@@ -286,6 +286,12 @@ runboard.finish()</pre>`);
     };
   }
 
+  function showLatest(c) {
+    if (!c.u || c.hover) return;
+    const n = c.u.data[0].length;
+    if (n) c.u.setLegend({ idx: n - 1 });
+  }
+
   function renderCharts() {
     const root = $("charts");
     const metrics = metricNames();
@@ -351,15 +357,19 @@ runboard.finish()</pre>`);
         }
         if (c.u && c.sig === sig) {
           c.u.setData(data, !c.zoomed);
+          showLatest(c);
         } else {
           c.u?.destroy();
           plot.innerHTML = "";
           const u = new uPlot(makeOpts(ks, width), data, plot);
           u.over.addEventListener("dblclick", () => { c.zoomed = false; });
+          u.over.addEventListener("mouseenter", () => { c.hover = true; });
+          u.over.addEventListener("mouseleave", () => { c.hover = false; setTimeout(() => showLatest(c), 0); });
           u.hooks.setSelect = [(uu) => { if (uu.select.width > 0) c.zoomed = true; }];
           c.u = u;
           c.sig = sig;
           c.zoomed = false;
+          showLatest(c);
         }
       }
     }

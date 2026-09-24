@@ -1,7 +1,12 @@
-.venv/
 __pycache__/
+*.py[cod]
 *.egg-info/
-.pytest_cache/
-runboard-runs/
-.demo-*
+build/
 dist/
+.venv/
+.pytest_cache/
+.coverage
+.DS_Store
+runboard-runs/
+logtool-runs/
+.demo-*

@@ -28,11 +28,21 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest"]
 
+[project.urls]
+Homepage = "https://github.com/Moe-Zbeeb/runboard"
+Documentation = "https://github.com/Moe-Zbeeb/runboard#readme"
+Issues = "https://github.com/Moe-Zbeeb/runboard/issues"
+Changelog = "https://github.com/Moe-Zbeeb/runboard/blob/main/CHANGELOG.md"
+
 [project.scripts]
 runboard = "runboard.cli:main"
 
-[tool.setuptools]
-packages = ["runboard"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
 runboard = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]

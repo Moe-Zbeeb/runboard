@@ -215,7 +215,14 @@ async function handle(request, env) {
       return postRun(request, env, project, runId);
     }
   }
-  if (request.method === "GET" || request.method === "HEAD") return env.ASSETS.fetch(request);
+  if (request.method === "GET" || request.method === "HEAD") {
+    if (url.pathname.startsWith("/static/")) {
+      const assetUrl = new URL(url);
+      assetUrl.pathname = url.pathname.slice(7);
+      return env.ASSETS.fetch(new Request(assetUrl, request));
+    }
+    return env.ASSETS.fetch(request);
+  }
   return response({ error: "not found" }, 404);
 }
 

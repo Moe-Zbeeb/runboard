@@ -118,7 +118,7 @@ def cmd_configure(args):
         raise SystemExit("runboard: access token cannot be empty")
     request = urllib.request.Request(
         f"{server}/api/health",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}", "User-Agent": "runboard/0.2"},
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:

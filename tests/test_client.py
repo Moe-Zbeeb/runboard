@@ -1,5 +1,6 @@
 import json
 import time
+from pathlib import Path
 from urllib.parse import quote
 
 import runboard
@@ -45,6 +46,15 @@ def test_configure_saves_verified_server(server, capsys):
     assert f"dashboard: {url}/?token={quote('secret')}" in output
     main(["url"])
     assert capsys.readouterr().out.strip() == f"{url}/?token=secret"
+
+
+def test_cloudflare_dashboard_matches_python_package():
+    root = Path(__file__).parents[1]
+    packaged = root / "src" / "runboard" / "static"
+    cloudflare = root / "cloudflare" / "public"
+    assert {path.name for path in packaged.iterdir()} == {path.name for path in cloudflare.iterdir()}
+    for path in packaged.iterdir():
+        assert path.read_bytes().rstrip() == (cloudflare / path.name).read_bytes().rstrip()
 
 
 def test_client_file_mode(tmp_path):

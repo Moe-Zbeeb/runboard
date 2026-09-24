@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Moe-Zbeeb/runboard"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"></a>
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Moe-Zbeeb/runboard/tree/main/cloudflare"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"></a>
 </p>
 
 <picture>
@@ -56,7 +56,7 @@ need to host a server and the dashboard keeps the same URL when jobs, login node
 **1. Deploy your personal backend.** Click the button, sign in to Cloudflare, and choose a long random
 `RUNBOARD_TOKEN` when prompted. Cloudflare creates the Worker, database, metric bucket, and dashboard.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Moe-Zbeeb/runboard)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Moe-Zbeeb/runboard/tree/main/cloudflare)
 
 Cloudflare gives you a URL such as `https://runboard.<account>.workers.dev`.
 

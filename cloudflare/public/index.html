@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpolyline points=%221,14 5,8 9,10 15,2%22 fill=%22none%22 stroke=%22%232a78d6%22 stroke-width=%222%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/uPlot.min.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="brand-mark"><i></i><i></i><i></i></span><span>runboard</span></div>
+  <div class="controls">
+    <label>Project
+      <select id="project"></select>
+    </label>
+    <label>X axis
+      <select id="xmode">
+        <option value="step">Step</option>
+        <option value="rel">Relative time (min)</option>
+        <option value="wall">Wall clock</option>
+      </select>
+    </label>
+    <label class="smooth">Smoothing <span id="smooth-val">0</span>
+      <input id="smooth" type="range" min="0" max="0.99" step="0.01" value="0">
+    </label>
+    <label class="check"><input id="logy" type="checkbox"> Log y</label>
+    <input id="metric-filter" type="search" placeholder="Filter metrics (regex)">
+    <button id="theme" class="theme-button" type="button" aria-label="Change color theme">System theme</button>
+    <span id="live" class="live" title="Auto-refresh every 2s"><span class="dot"></span><span id="live-text">live</span></span>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar">
+    <input id="run-filter" type="search" placeholder="Search runs">
+    <div class="sidebar-actions">
+      <button id="select-none" type="button">Clear selection</button>
+      <span id="sel-count" class="muted"></span>
+    </div>
+    <ul id="runs" class="runs"></ul>
+  </aside>
+  <main>
+    <div id="message" class="message" hidden></div>
+    <details id="summary-wrap" class="summary">
+      <summary>Summary table</summary>
+      <div class="table-scroll"><table id="summary"></table></div>
+    </details>
+    <div id="charts"></div>
+  </main>
+</div>
+<dialog id="details">
+  <form method="dialog"><button class="close" aria-label="Close">✕</button></form>
+  <h3 id="details-title"></h3>
+  <pre id="details-body"></pre>
+</dialog>
+<script src="/static/uPlot.iife.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
+

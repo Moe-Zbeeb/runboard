@@ -3,7 +3,7 @@ import sys
 from .client import Run, sync
 
 __all__ = ["init", "log", "finish", "Run", "sync", "run"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 run = None
 _orig_excepthook = sys.excepthook

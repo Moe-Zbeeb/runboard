@@ -1,5 +1,6 @@
 import json
 import time
+from urllib.parse import quote
 
 import runboard
 from runboard import config
@@ -32,6 +33,18 @@ def test_client_discovers_server_from_config(server):
     runboard.log({"x": 1})
     runboard.finish()
     assert wait_for(lambda: server.storage.read_rows("auto", r.run_id)[0])
+
+
+def test_configure_saves_verified_server(server, capsys):
+    from runboard.cli import main
+
+    url = f"http://127.0.0.1:{server.port}"
+    main(["configure", url + "/", "--token", "secret"])
+    assert config.read_server_info() == {"url": url, "token": "secret"}
+    output = capsys.readouterr().out
+    assert f"dashboard: {url}/?token={quote('secret')}" in output
+    main(["url"])
+    assert capsys.readouterr().out.strip() == f"{url}/?token=secret"
 
 
 def test_client_file_mode(tmp_path):

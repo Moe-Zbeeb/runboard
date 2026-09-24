@@ -1,7 +1,7 @@
 <h1 align="center">runboard</h1>
 
 <p align="center">
-  <b>Live training dashboards for any cluster or VM, open in your browser from anywhere, no SSH tunnel needed.</b>
+  <b>Your own live experiment dashboard on Cloudflare, from any cluster or VM.</b>
 </p>
 
 <p align="center">
@@ -12,31 +12,37 @@
   <a href="https://github.com/Moe-Zbeeb/runboard/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Moe-Zbeeb/runboard" alt="License"></a>
 </p>
 
+<p align="center">
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Moe-Zbeeb/runboard"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"></a>
+</p>
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Moe-Zbeeb/runboard/main/docs/assets/dashboard-dark.png">
   <img alt="runboard dashboard comparing three training runs" src="https://raw.githubusercontent.com/Moe-Zbeeb/runboard/main/docs/assets/dashboard-light.png">
 </picture>
 
-runboard is a self-hosted, W&B-style experiment dashboard. It is built for the setup most researchers
-actually have: jobs running on a Slurm cluster, a lab server, or a cloud VM that you can SSH into but
-that the internet can't reach.
+runboard is a personal, W&B-style experiment dashboard. Each researcher deploys one small backend to
+their own Cloudflare account. Training jobs send metrics directly over HTTPS, so the cluster does not
+need to host a server and the dashboard keeps the same URL when jobs, login nodes, or laptops restart.
 
 - **Two lines in your training code.** `runboard.init(...)` and `runboard.log({...})`.
-- **Viewable from anywhere.** `runboard serve --tunnel` prints a public HTTPS URL, created by an
-  *outbound* Cloudflare quick tunnel. You don't need root, open ports, an account, or `ssh -L`.
+- **Bring your own Cloudflare.** One click creates a Worker, D1 database, R2 bucket, and static dashboard
+  in your account. No domain or always-on cluster process is required.
+- **One stable URL.** Jobs and browsers connect to the same `workers.dev` HTTPS endpoint from anywhere.
 - **Zero dependencies.** The client, server, and dashboard use only the Python standard library.
   `pip install runboard` works on any cluster, even behind a restrictive proxy.
 - **Keeps network and disk work out of training.** `log()` appends metrics in memory; a background
   thread sends batches, retries outages, and spills excess backlog to disk. Remaining metrics are
   saved when the run finishes.
-- **Your data, plain files.** Runs are stored as `<project>/<run_id>/metrics.jsonl`, so you can
-  `grep`, `rsync`, or load them into pandas.
+- **A local mode when you need it.** The same package can store plain JSONL files and serve them from a
+  cluster or laptop without Cloudflare storage.
 
 ## Contents
 
 - [Quickstart](#quickstart)
 - [How it works](#how-it-works)
 - [Logging API](#logging-api)
+- [Cloudflare deployment](#cloudflare-deployment)
 - [Running on a cluster](#running-on-a-cluster)
 - [The dashboard](#the-dashboard)
 - [Configuration](#configuration)
@@ -47,24 +53,24 @@ that the internet can't reach.
 
 ## Quickstart
 
+**1. Deploy your personal backend.** Click the button, sign in to Cloudflare, and choose a long random
+`RUNBOARD_TOKEN` when prompted. Cloudflare creates the Worker, database, metric bucket, and dashboard.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Moe-Zbeeb/runboard)
+
+Cloudflare gives you a URL such as `https://runboard.<account>.workers.dev`.
+
+**2. Install and connect the Python client** on each machine or shared cluster home:
+
 ```bash
 pip install runboard
+runboard configure https://runboard.<account>.workers.dev
 ```
 
-**1. Start the server** on the cluster login node or VM:
+The command asks for the same token, verifies the deployment, and saves both values in
+`~/.runboard/server.json` with mode `600`.
 
-```bash
-runboard serve --tunnel
-```
-
-```text
-runboard serving /home/you/runboard-runs
-  local:   http://127.0.0.1:8080/?token=Xk3...
-  cluster: http://login-node-3:8080/?token=Xk3...
-  public:  https://calm-river-demo.trycloudflare.com/?token=Xk3...
-```
-
-**2. Log from your training script:**
+**3. Log from your training script:**
 
 ```python
 import runboard
@@ -81,34 +87,32 @@ for step in range(num_steps):
 runboard.finish()
 ```
 
-**3. Open the `public:` URL** on your laptop or phone. Charts update live every two seconds.
+**4. Open the URL printed by `runboard configure`.** Charts update live every two seconds.
 
-`runboard.init()` finds the server on its own. `runboard serve` writes its address and token to
-`~/.runboard/server.json`, and on most clusters your home directory is shared by every node.
+`runboard.init()` reads the saved endpoint automatically. On clusters with a shared home directory,
+configure it once and every compute node uses it. For containers or separate machines, set
+`RUNBOARD_SERVER` and `RUNBOARD_TOKEN` as environment variables.
 
 ## How it works
 
 ```text
-  compute nodes                      login node / VM                           anywhere
- ┌──────────────────┐   HTTP    ┌───────────────────────────────┐          ┌───────────┐
- │ train.py         │ ────────► │ runboard serve                │          │  browser  │
- │   runboard.log() │           │   ├── REST API                │ ◄──────► │ dashboard │
- │   (background    │  or files │   ├── runs/*/metrics.jsonl    │  HTTPS   │           │
- │    batching)     │ ─ ─ ─ ─ ► │   ├── dashboard (static)      │          └───────────┘
- └──────────────────┘ shared FS │   └── cloudflared ────────────┼──outbound──► trycloudflare.com
-                                └───────────────────────────────┘
+  cluster / VM                         your Cloudflare account                 anywhere
+ ┌──────────────────┐    HTTPS    ┌───────────────────────────────┐        ┌───────────┐
+ │ train.py         │ ──────────► │ Worker: auth + REST API       │ ◄────► │  browser  │
+ │   runboard.log() │             │ D1: runs + batch index        │ HTTPS  │ dashboard │
+ │   retry + spool  │             │ R2: metric batches            │        └───────────┘
+ └──────────────────┘             │ Assets: dashboard             │
+                                  └───────────────────────────────┘
 ```
 
 1. Your script appends metrics to an in-memory buffer. A background thread sends them to the
    server once per second, in chunks of up to 5,000 rows.
-2. The server appends them to one JSONL file per run. Every row carries a sequence number, so a
-   batch that is retried after a dropped connection is never stored twice.
-3. With `--tunnel`, the server starts [`cloudflared`](https://github.com/cloudflare/cloudflared)
-   (downloaded automatically into `~/.cache/runboard`, no root needed). It opens an **outbound**
-   connection to Cloudflare, which gives you a public HTTPS URL. Any machine that can reach the
-   internet over HTTPS can do this. No inbound ports are opened.
-4. The dashboard is one static page ([uPlot](https://github.com/leeoniya/uPlot) charts, bundled).
-   It polls the server and fetches only the rows it hasn't seen yet.
+2. The Cloudflare Worker authenticates the request, stores run metadata and its metric-batch index in
+   D1, and stores metric payloads in R2. Retried batches have deterministic IDs and are stored once.
+3. The dashboard is served by the same Worker. It polls every two seconds and fetches only batches it
+   has not seen.
+4. If Cloudflare or the network is unavailable, the client retries with backoff and writes remaining
+   data to `~/.runboard/spool/`. `runboard sync` sends it later.
 
 More detail is in [docs/architecture.md](docs/architecture.md).
 
@@ -150,9 +154,60 @@ with backoff; excess backlog is saved in the background. Rows still unsent when 
 runboard sync
 ```
 
+## Cloudflare deployment
+
+The deploy button is the normal path. It uses [Cloudflare's automatic resource provisioning](https://developers.cloudflare.com/workers/platform/deploy-buttons/),
+so every user receives isolated resources in their own account. A custom domain is optional; the
+generated `workers.dev` address is stable and sufficient.
+
+To deploy from a terminal instead:
+
+```bash
+git clone https://github.com/Moe-Zbeeb/runboard && cd runboard
+npm install
+npx wrangler login
+npm run deploy
+```
+
+Generate a token, then store it as a Worker secret when Wrangler prompts for its value:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
+npx wrangler secret put RUNBOARD_TOKEN
+```
+
+The Worker creates its schema on the first authenticated request. The SQL migration is also kept in
+`cloudflare/migrations/` for inspection and future upgrades.
+
+For local Worker development, copy `.dev.vars.example` to `.dev.vars`, replace its value, and run
+`npm run dev`. Wrangler keeps local D1 and R2 data under `.wrangler/`.
+
+Cloudflare's free plan is enough for personal use and normal research runs, subject to its current
+[Workers](https://developers.cloudflare.com/workers/platform/pricing/),
+[D1](https://developers.cloudflare.com/d1/platform/pricing/), and
+[R2](https://developers.cloudflare.com/r2/pricing/) quotas. Large sweeps or very frequent logging can
+exceed those quotas. Runboard batches writes, but log at a useful interval instead of every inner-loop
+operation.
+
 ## Running on a cluster
 
-### Keep the server alive
+### Recommended: send directly to Cloudflare
+
+If the cluster home is shared, run `runboard configure` once on a login node. Otherwise inject the
+settings into the job:
+
+```bash
+export RUNBOARD_SERVER="https://runboard.<account>.workers.dev"
+export RUNBOARD_TOKEN="your-token"
+python train.py
+```
+
+Only outbound HTTPS is required. There is no Runboard daemon on the login node and no tunnel to keep
+alive.
+
+### Local server mode
+
+When experiments must remain inside the cluster, run the included local server:
 
 Run it in `tmux` or with `nohup` on the login node:
 
@@ -169,7 +224,7 @@ sbatch examples/slurm/serve.sbatch
 grep public: runboard-*.out
 ```
 
-### Getting the URL without SSH
+### Quick-tunnel URL notifications
 
 The quick-tunnel URL changes whenever the server restarts. Use `--notify` to have each new URL pushed
 to your phone through [ntfy](https://ntfy.sh). Install the app and subscribe to a private,
@@ -179,7 +234,7 @@ hard-to-guess topic:
 runboard serve --tunnel --notify https://ntfy.sh/my-private-topic-8f3k2
 ```
 
-### Training jobs
+### Local server discovery
 
 Nothing extra is needed. Jobs discover the server through `~/.runboard/server.json`. See
 [examples/slurm/train.sbatch](examples/slurm/train.sbatch) and
@@ -219,6 +274,7 @@ or set `export RUNBOARD_DIR=~/runboard-runs` in your job script. The server pick
 
 | Command | Description |
 |---|---|
+| `runboard configure URL` | Verify and save a personal Cloudflare or other hosted endpoint. Prompts securely for its token; `--token` is available for automation. |
 | `runboard serve` | Start the server. Options: `--dir` (default `./runboard-runs`), `--port` (default 8080, falls back to a free port if taken), `--host`, `--tunnel`, `--notify URL`, `--advertise URL` (address jobs should use) |
 | `runboard ls [--dir D]` | List runs with status and last update |
 | `runboard sync [files…]` | Upload spooled offline metrics |
@@ -227,33 +283,34 @@ or set `export RUNBOARD_DIR=~/runboard-runs` in your job script. The server pick
 
 ## Security
 
-- Every request, including the dashboard itself, needs the access token. It is generated once, stored
-  in `~/.runboard/token` (mode `600`), and compared in constant time.
+- Every request, including the dashboard itself, needs the access token. For Cloudflare, each user
+  chooses it during deployment and stores it as a Worker secret. The local server generates one.
 - Opening `/?token=…` stores the token in an `HttpOnly` cookie and removes it from the address bar.
-- The public URL is HTTPS end to end. Cloudflare relays the traffic and does not store it.
+- The hosted endpoint uses HTTPS. Run metadata is stored in D1 and metric batches in R2 inside the
+  user's Cloudflare account.
 - **Anyone with the URL and the token can read your metrics.** Treat the full URL like a password. To
-  rotate the token, delete `~/.runboard/token` and restart the server.
-- Without `--tunnel`, nothing is exposed outside your network.
+  rotate a Cloudflare token, run `npx wrangler secret put RUNBOARD_TOKEN` from the repository and
+  re-run `runboard configure`. For a local server, delete `~/.runboard/token` and restart it.
 
 ## FAQ
 
 **How is this different from W&B or TensorBoard?**
 W&B is a hosted service, so your metrics leave your infrastructure and you need an account.
 TensorBoard needs port forwarding or a tunnel you set up yourself, and it reads event files.
-runboard is a single `pip install` with no dependencies that you run yourself, and it gets you a
-public URL without SSH.
+runboard gives every user their own small Cloudflare backend and keeps the Python client dependency-free.
 
 **Does it work on clusters with no internet access?**
-Logging and the dashboard work on the internal network. The public URL needs outbound HTTPS from the
-server's machine. If that is blocked, use `ssh -L 8080:localhost:8080` as a fallback.
+Cloudflare mode needs outbound HTTPS from compute nodes. If that is blocked, use local file mode with
+`RUNBOARD_DIR` and `runboard serve`, then access it over the internal network or an SSH tunnel.
 
 **Can I log from any experiment?**
 Yes. Log numeric metrics with any names, group them with `/`, and include any JSON-compatible
 hyperparameters in the run config. The tracker has no framework dependency, so it can live in a plain
-Python loop or a PyTorch, JAX, or other training script. Each run's full metric history stays in JSONL.
+Python loop or a PyTorch, JAX, or other training script. Each backend retains the run's full metric
+history.
 
 **Can I analyze the data myself?**
-Yes. Every run is `<dir>/<project>/<run_id>/metrics.jsonl`:
+Local mode stores every run as `<dir>/<project>/<run_id>/metrics.jsonl`:
 
 ```python
 import pandas as pd
@@ -267,6 +324,8 @@ git clone https://github.com/Moe-Zbeeb/runboard && cd runboard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
+npm install
+npm run check:cloud
 ```
 
 Try it end to end with `runboard serve` in one terminal and `python examples/quickstart.py` in another.

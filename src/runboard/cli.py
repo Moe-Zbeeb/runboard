@@ -1,10 +1,13 @@
 import argparse
+import getpass
 import signal
 import socket
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
+from urllib.parse import quote
 
 from . import __version__, config
 from .client import sync
@@ -104,8 +107,32 @@ def cmd_sync(args):
 
 def cmd_url(args):
     info = config.read_server_info()
-    token = config.get_or_create_token()
+    token = info.get("token") or config.get_or_create_token()
     print(info.get("public_url") or f"{info.get('url', 'http://127.0.0.1:8080')}/?token={token}")
+
+
+def cmd_configure(args):
+    server = args.server.rstrip("/")
+    token = args.token or getpass.getpass("Runboard access token: ").strip()
+    if not token:
+        raise SystemExit("runboard: access token cannot be empty")
+    request = urllib.request.Request(
+        f"{server}/api/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            if response.status != 200:
+                raise OSError(f"HTTP {response.status}")
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise SystemExit("runboard: the server rejected that token") from e
+        raise SystemExit(f"runboard: could not validate the server (HTTP {e.code})") from e
+    except OSError as e:
+        raise SystemExit(f"runboard: could not reach {server}: {e}") from e
+    config.write_server_info({"url": server, "token": token})
+    print(f"configured {server}")
+    print(f"dashboard: {server}/?token={quote(token, safe='')}")
 
 
 def main(argv=None):
@@ -133,6 +160,11 @@ def main(argv=None):
 
     s = sub.add_parser("url", help="print the dashboard URL")
     s.set_defaults(func=cmd_url)
+
+    s = sub.add_parser("configure", help="save and verify a hosted Runboard server")
+    s.add_argument("server", help="Runboard URL, such as https://runboard.<account>.workers.dev")
+    s.add_argument("--token", help="access token; omitted values are read securely from the terminal")
+    s.set_defaults(func=cmd_configure)
 
     p.add_argument("--version", action="version", version=f"runboard {__version__}")
     args = p.parse_args(argv)

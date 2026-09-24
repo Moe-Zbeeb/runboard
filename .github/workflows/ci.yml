@@ -45,3 +45,26 @@ jobs:
         with:
           name: dist
           path: dist/
+
+  cloudflare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check:cloud
+      - run: |
+          printf 'RUNBOARD_TOKEN=integration-token\n' > .dev.vars
+          npm run dev -- --port 8787 > /tmp/runboard-worker.log 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS -H 'Authorization: Bearer integration-token' http://127.0.0.1:8787/api/health; then
+              break
+            fi
+            sleep 1
+          done
+          RUNBOARD_TEST_URL=http://127.0.0.1:8787 RUNBOARD_TEST_TOKEN=integration-token npm run test:cloud

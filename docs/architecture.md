@@ -1,6 +1,6 @@
 # Architecture
 
-runboard has five small parts, each in its own module under `src/runboard/`.
+runboard has a dependency-free Python client, two interchangeable backends, and one static dashboard.
 
 | Module | Responsibility |
 |---|---|
@@ -8,8 +8,9 @@ runboard has five small parts, each in its own module under `src/runboard/`.
 | `storage.py` | On-disk layout, append with de-duplication, incremental reads by byte offset |
 | `server.py` | `ThreadingHTTPServer` exposing the REST API and the static dashboard, token auth |
 | `tunnel.py` | Finds or downloads `cloudflared`, runs a quick tunnel, reports the public URL |
-| `cli.py` | `runboard serve / ls / sync / url` |
+| `cli.py` | `runboard configure / serve / ls / sync / url` |
 | `static/` | The dashboard: `index.html`, `app.js`, `style.css`, bundled uPlot |
+| `cloudflare/src/worker.js` | Hosted REST API, authentication, D1 index, R2 metric storage, static assets |
 
 ## Design constraints
 
@@ -18,8 +19,25 @@ runboard has five small parts, each in its own module under `src/runboard/`.
 - **Zero runtime dependencies.** Only the Python standard library, so `pip install` works behind proxies
   and on old Python versions (3.8+).
 - **Never hurt training.** `log()` must be cheap and must never raise because of the network.
+- **No cluster daemon required.** The default backend runs in each user's Cloudflare account and has a
+  stable URL.
+- **Same protocol everywhere.** The Python server and Cloudflare Worker expose the same API.
 
-## Storage layout
+## Cloudflare storage
+
+D1 contains run metadata and an ordered index of metric batches. R2 contains the JSON payload for each
+batch. Keeping metric arrays in R2 avoids creating one database write per training step and avoids
+database row-size pressure for wide experiments.
+
+Each metric batch receives a SHA-256 key derived from its project, run, and rows. A retry writes the
+same R2 object and `INSERT OR IGNORE` keeps one D1 index record. The browser treats the D1 batch ID as
+its incremental offset and downloads one new batch at a time.
+
+The Worker creates the schema with idempotent DDL when its first authenticated request arrives. D1,
+R2, and static assets are declared without account-specific IDs in `wrangler.jsonc`, allowing Wrangler
+and the Cloudflare deploy button to provision separate resources for every user.
+
+## Local storage layout
 
 ```text
 <root>/
@@ -74,7 +92,7 @@ or the `runboard_token` cookie.
 The dashboard polls every 2 s rather than using server-sent events, because long-lived streams are
 unreliable through tunnels and proxies. Byte offsets keep each poll incremental.
 
-## Tunnel
+## Local tunnel
 
 `runboard serve --tunnel` resolves `cloudflared` from `PATH`, then from `~/.cache/runboard/`. If neither
 exists, it downloads the release binary for the platform. It runs

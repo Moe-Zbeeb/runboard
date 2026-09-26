@@ -47,6 +47,16 @@ def clean_row(row):
     return out
 
 
+def clean_meta(value):
+    if isinstance(value, float):
+        return value if math.isfinite(value) else repr(value)
+    if isinstance(value, dict):
+        return {k: clean_meta(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [clean_meta(v) for v in value]
+    return value
+
+
 def _sequence_state(path):
     state = {}
     try:
@@ -88,7 +98,7 @@ class Storage:
                     current = json.loads(p.read_text())
                 except ValueError:
                     current = {}
-            current.update(meta)
+            current.update(clean_meta(meta))
             current.setdefault("project", project)
             current.setdefault("run_id", run_id)
             current.setdefault("name", run_id)

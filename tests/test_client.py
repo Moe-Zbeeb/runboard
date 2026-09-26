@@ -179,3 +179,164 @@ def test_unexpected_send_errors_never_reach_user_code(tmp_path):
     run.log({"v": 1})
     run.finish(timeout=5)
     assert [r["v"] for r in sink.got] == [1]
+
+
+def test_missing_or_corrupt_spool_does_not_block_delivery(server):
+    run = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=60)
+    spool = config.home() / "spool"
+    spool.mkdir(parents=True)
+    corrupt = spool / "corrupt.jsonl"
+    corrupt.write_text('{"rows": [')
+    run._pending_spools.extend([spool / "gone.jsonl", corrupt])
+    run.log({"v": 1})
+    run.finish(timeout=3)
+    rows, _ = server.storage.read_rows("p", run.run_id)
+    assert [r["v"] for r in rows] == [1]
+    assert run._pending_spools == []
+    assert not corrupt.exists()
+
+
+def _strict_json(data):
+    def reject(value):
+        raise ValueError(f"non-standard JSON constant {value}")
+
+    return json.loads(data, parse_constant=reject)
+
+
+def test_non_finite_config_values_stay_valid_json(server):
+    cfg = {"max_grad_norm": float("inf"), "floor": float("-inf"), "nested": [float("nan"), 1.5], "t": (1, 2)}
+    run = Run("p", config=cfg, server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=0.05)
+    run.log({"v": 1})
+    run.finish()
+    _, body = http_get(server, "/api/runs")
+    got = _strict_json(body)[0]["config"]
+    assert got == {"max_grad_norm": "inf", "floor": "-inf", "nested": ["nan", 1.5], "t": [1, 2]}
+    assert server.storage.read_rows("p", run.run_id)[0][0]["v"] == 1.0
+
+
+def test_storage_meta_is_valid_json(tmp_path):
+    s = Storage(tmp_path)
+    s.update_meta("p", "r", {"config": {"x": float("nan")}})
+    assert _strict_json((tmp_path / "p" / "r" / "meta.json").read_text())["config"] == {"x": "nan"}
+
+
+def test_default_flush_interval_depends_on_backend(server, tmp_path):
+    http_run = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret")
+    file_run = Run("p", dir=str(tmp_path / "files"))
+    explicit = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=0.5)
+    try:
+        assert (http_run.flush_interval, file_run.flush_interval, explicit.flush_interval) == (10.0, 1.0, 0.5)
+    finally:
+        for run in (http_run, file_run, explicit):
+            run.finish()
+
+
+def test_serve_does_not_replace_hosted_configuration(tmp_path):
+    from runboard.cli import _claim_server_info
+
+    hosted = {"url": "https://runboard.example.workers.dev", "token": "cloud"}
+    config.write_server_info(hosted)
+    assert not _claim_server_info({"url": "http://node:8080", "token": "local", "dir": str(tmp_path)})
+    assert config.read_server_info() == hosted
+    config.write_server_info({"url": "http://old:8080", "token": "local", "dir": str(tmp_path)})
+    assert _claim_server_info({"url": "http://node:8080", "token": "local", "dir": str(tmp_path)})
+    assert config.read_server_info()["url"] == "http://node:8080"
+
+
+def _run_and_terminate(tmp_path, prelude):
+    import signal
+    import subprocess
+    import sys
+    import textwrap
+
+    script = tmp_path / "job.py"
+    script.write_text(textwrap.dedent(f"""
+        import os, signal, sys, time
+        {prelude}
+        import runboard
+        run = runboard.init("p", run_id="term", dir=sys.argv[1])
+        for i in range(5):
+            runboard.log({{"v": i}})
+        print("ready", flush=True)
+        while True:
+            runboard.log({{"v": 99}})
+            time.sleep(0.01)
+    """))
+    proc = subprocess.Popen([sys.executable, str(script), str(tmp_path / "runs")], stdout=subprocess.PIPE, text=True)
+    assert proc.stdout.readline().strip() == "ready"
+    proc.send_signal(signal.SIGTERM)
+    out, _ = proc.communicate(timeout=30)
+    return proc.returncode, out, Storage(tmp_path / "runs")
+
+
+def test_sigterm_marks_run_killed_and_keeps_signal_exit(tmp_path):
+    import signal
+
+    code, _, storage = _run_and_terminate(tmp_path, "")
+    assert code == -signal.SIGTERM
+    assert storage.read_meta("p", "term")["status"] == "killed"
+    assert [r["v"] for r in storage.read_rows("p", "term")[0][:5]] == [0, 1, 2, 3, 4]
+
+
+def test_sigterm_chains_existing_handler(tmp_path):
+    prelude = 'signal.signal(signal.SIGTERM, lambda *a: (print("previous", flush=True), sys.exit(3)))'
+    code, out, storage = _run_and_terminate(tmp_path, prelude)
+    assert code == 3 and "previous" in out
+    assert storage.read_meta("p", "term")["status"] == "killed"
+
+
+def test_transient_failure_keeps_rows_in_memory_below_max_buffer(tmp_path):
+    class Flaky:
+        fail = True
+        got = []
+
+        def send(self, project, run_id, meta, rows):
+            if Flaky.fail:
+                raise OSError("down")
+            Flaky.got += rows
+
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=0.05)
+    run._sink = Flaky()
+    for i in range(10):
+        run.log({"v": i})
+    time.sleep(0.5)
+    assert not list((config.home() / "spool").glob("*.jsonl"))
+    Flaky.fail = False
+    run.log({"v": 10})
+    run.finish(timeout=5)
+    assert [r["v"] for r in Flaky.got] == list(range(11))
+
+
+def test_restore_preserves_order_and_respects_max_buffer(tmp_path):
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=60, max_buffer=3)
+    try:
+        run._overflow = [{"v": 2}]
+        run._rows = [{"v": 3}, {"v": 4}]
+        run._restore({}, [{"v": 0}, {"v": 1}])
+        assert [r["v"] for r in run._overflow] == [0, 1]
+        assert [r["v"] for r in run._rows] == [2, 3, 4]
+    finally:
+        run._overflow, run._rows = [], []
+        run.finish()
+
+
+def test_finish_drains_many_spools_without_waiting_between_them(server):
+    run = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=60)
+    for i in range(6):
+        run._pending_spools.append(run._spool({}, [{"v": i, "_step": i, "_seq": i, "_sid": run._sid}]))
+    run._seq = 6
+    t0 = time.time()
+    run.finish(timeout=3)
+    assert time.time() - t0 < 3
+    rows, _ = server.storage.read_rows("p", run.run_id)
+    assert [r["v"] for r in rows] == list(range(6))
+    assert not list((config.home() / "spool").glob("*.jsonl"))
+
+
+def test_background_sender_drains_spools_back_to_back(server):
+    run = Run("p", server=f"http://127.0.0.1:{server.port}", token="secret", flush_interval=2)
+    for i in range(4):
+        run._pending_spools.append(run._spool({}, [{"v": i, "_step": i, "_seq": i, "_sid": run._sid}]))
+    run._seq = 4
+    assert wait_for(lambda: len(server.storage.read_rows("p", run.run_id)[0]) == 4, timeout=3.5)
+    run.finish()

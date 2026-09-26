@@ -1,6 +1,6 @@
 (() => {
   const MAX_SELECTED = 8;
-  const POLL_MS = 2000;
+  const POLL_MS = 5000;
   const STALE_S = 600;
 
   const state = {
@@ -167,16 +167,25 @@ runboard.finish()</pre>`);
     }
   }
 
-  async function refreshData() {
+  let dataQueue = Promise.resolve();
+  function refreshData() {
+    const next = dataQueue.then(fetchSelected);
+    dataQueue = next.catch(() => false);
+    return next;
+  }
+
+  async function fetchSelected() {
     let changed = false;
     await Promise.all(state.selected.map(async (k) => {
       const r = state.runs.get(k);
       if (!r) return;
       let d = state.data.get(k);
       if (!d) {
-        d = { offset: 0, t0: null, series: new Map() };
+        d = { offset: 0, t0: null, series: new Map(), seen: null };
         state.data.set(k, d);
       }
+      const seen = `${r.status}|${r.updated}`;
+      if (d.seen === seen) return;
       for (let guard = 0; guard < 1000; guard++) {
         const q = `/api/metrics?project=${encodeURIComponent(r.project)}&run=${encodeURIComponent(r.run_id)}&offset=${d.offset}`;
         const res = await api(q);
@@ -184,7 +193,7 @@ runboard.finish()</pre>`);
         ingest(d, res.rows);
         const done = res.offset === d.offset || !res.rows.length;
         d.offset = res.offset;
-        if (done) break;
+        if (done) { d.seen = seen; break; }
       }
     }));
     return changed;
@@ -435,7 +444,7 @@ runboard.finish()</pre>`);
   let busy = false;
   let lastRunsSig = "";
   async function poll() {
-    if (busy) return;
+    if (busy || document.hidden) return;
     busy = true;
     try {
       await refreshRuns();
@@ -510,6 +519,7 @@ runboard.finish()</pre>`);
     });
     let rt;
     window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { renderRuns(); redraw(); });
   }
 

@@ -28,3 +28,16 @@ def test_server_cookie_login(server):
     req = urllib.request.Request(f"http://127.0.0.1:{server.port}/", headers={"Cookie": cookie})
     with urllib.request.urlopen(req, timeout=5) as r:
         assert b"<html" in r.read().lower()
+
+
+def test_server_rejects_bad_content_length(server):
+    import http.client
+
+    for value in ("-5", "abc"):
+        conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+        conn.putrequest("POST", "/api/runs/p/r")
+        conn.putheader("Authorization", "Bearer secret")
+        conn.putheader("Content-Length", value)
+        conn.endheaders()
+        assert conn.getresponse().status == 400
+        conn.close()

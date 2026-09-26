@@ -1,6 +1,8 @@
 const COOKIE = "runboard_token";
 const NAME = /^[A-Za-z0-9._-]{1,128}$/;
 const MAX_BODY = 1500000;
+const MAX_PAGE_BATCHES = 64;
+const MAX_PAGE_BYTES = 4000000;
 
 let schemaReady;
 
@@ -58,6 +60,7 @@ function ensureSchema(env) {
     schemaReady = env.DB.batch([
       env.DB.prepare("CREATE TABLE IF NOT EXISTS runs (project TEXT NOT NULL, run_id TEXT NOT NULL, name TEXT NOT NULL, meta TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, PRIMARY KEY (project, run_id))"),
       env.DB.prepare("CREATE TABLE IF NOT EXISTS metric_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, run_id TEXT NOT NULL, rows_json TEXT NOT NULL, row_count INTEGER NOT NULL, created REAL NOT NULL, batch_key TEXT NOT NULL UNIQUE)"),
+      env.DB.prepare("CREATE TABLE IF NOT EXISTS run_sessions (project TEXT NOT NULL, run_id TEXT NOT NULL, sid TEXT NOT NULL, last_seq INTEGER NOT NULL, PRIMARY KEY (project, run_id, sid))"),
       env.DB.prepare("CREATE INDEX IF NOT EXISTS runs_created ON runs (created DESC)"),
       env.DB.prepare("CREATE INDEX IF NOT EXISTS metric_batches_run ON metric_batches (project, run_id, id)"),
     ]).catch((error) => {
@@ -92,6 +95,32 @@ function cleanRows(value) {
 async function hashRows(project, runId, rows) {
   const bytes = await digest(`${project}\n${runId}\n${JSON.stringify(rows)}`);
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function sessionOf(row) {
+  return typeof row._sid === "string" && Number.isSafeInteger(row._seq) ? row._sid : null;
+}
+
+async function unseenRows(env, project, runId, rows) {
+  const sids = [...new Set(rows.map(sessionOf).filter((sid) => sid !== null))];
+  if (!sids.length) return { rows, sessions: new Map() };
+  const placeholders = sids.map(() => "?").join(", ");
+  const stored = await env.DB.prepare(`SELECT sid, last_seq FROM run_sessions WHERE project = ? AND run_id = ? AND sid IN (${placeholders})`)
+    .bind(project, runId, ...sids)
+    .all();
+  const last = new Map(stored.results.map((row) => [row.sid, row.last_seq]));
+  const sessions = new Map();
+  const fresh = [];
+  for (const row of rows) {
+    const sid = sessionOf(row);
+    if (sid !== null) {
+      const previous = sessions.has(sid) ? sessions.get(sid) : last.has(sid) ? last.get(sid) : -1;
+      if (row._seq <= previous) continue;
+      sessions.set(sid, row._seq);
+    }
+    fresh.push(row);
+  }
+  return { rows: fresh, sessions };
 }
 
 async function updateRun(env, project, runId, meta, updated) {
@@ -137,13 +166,18 @@ async function postRun(request, env, project, runId) {
     return response({ error: error.message }, 400);
   }
   const updated = rows.reduce((latest, row) => Math.max(latest, Number(row._time) || 0), Date.now() / 1000);
-  if (rows.length) {
-    const batchKey = await hashRows(project, runId, rows);
+  const fresh = await unseenRows(env, project, runId, rows);
+  if (fresh.rows.length) {
+    const batchKey = await hashRows(project, runId, fresh.rows);
     const exists = await env.DB.prepare("SELECT 1 FROM metric_batches WHERE batch_key = ?").bind(batchKey).first();
     if (!exists) {
-      await env.DB.prepare("INSERT OR IGNORE INTO metric_batches (project, run_id, rows_json, row_count, created, batch_key) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(project, runId, JSON.stringify(rows), rows.length, updated, batchKey)
-        .run();
+      await env.DB.batch([
+        env.DB.prepare("INSERT OR IGNORE INTO metric_batches (project, run_id, rows_json, row_count, created, batch_key) VALUES (?, ?, ?, ?, ?, ?)")
+          .bind(project, runId, JSON.stringify(fresh.rows), fresh.rows.length, updated, batchKey),
+        ...[...fresh.sessions].map(([sid, seq]) =>
+          env.DB.prepare("INSERT INTO run_sessions (project, run_id, sid, last_seq) VALUES (?, ?, ?, ?) ON CONFLICT (project, run_id, sid) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq)")
+            .bind(project, runId, sid, seq)),
+      ]);
     }
   }
   await updateRun(env, project, runId, meta, updated);
@@ -171,17 +205,25 @@ async function getMetrics(env, url) {
   if (!validName(project) || !validName(runId) || !Number.isSafeInteger(rawOffset) || rawOffset < 0) {
     return response({ error: "invalid project, run, or offset" }, 400);
   }
-  const batch = await env.DB.prepare("SELECT id, rows_json FROM metric_batches WHERE project = ? AND run_id = ? AND id > ? ORDER BY id LIMIT 1")
-    .bind(project, runId, rawOffset)
-    .first();
-  if (!batch) return response({ rows: [], offset: rawOffset });
-  let rows = [];
-  try {
-    rows = JSON.parse(batch.rows_json);
-  } catch {
-    rows = [];
+  const batches = await env.DB.prepare("SELECT id, rows_json FROM metric_batches WHERE project = ? AND run_id = ? AND id > ? ORDER BY id LIMIT ?")
+    .bind(project, runId, rawOffset, MAX_PAGE_BATCHES)
+    .all();
+  const rows = [];
+  let offset = rawOffset;
+  let bytes = 0;
+  for (const batch of batches.results) {
+    if (offset !== rawOffset && bytes + batch.rows_json.length > MAX_PAGE_BYTES) break;
+    let parsed = [];
+    try {
+      parsed = JSON.parse(batch.rows_json);
+    } catch {
+      parsed = [];
+    }
+    for (const row of parsed) rows.push(row);
+    bytes += batch.rows_json.length;
+    offset = batch.id;
   }
-  return response({ rows, offset: batch.id });
+  return response({ rows, offset });
 }
 
 async function handle(request, env) {

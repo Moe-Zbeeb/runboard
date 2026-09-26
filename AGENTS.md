@@ -37,7 +37,8 @@ Local mode remains supported for offline clusters and development. It uses the s
 - Network, retry, batching, and spool work belong in the background sender thread.
 - Logging and delivery failures must never raise into training code.
 - `finish()` must attempt a bounded flush and spool any unsent data.
-- Delivery must remain safe to retry. Local storage uses `_sid` and `_seq`; Cloudflare uses a deterministic SHA-256 batch key.
+- `SIGTERM` must finish live runs as `killed`, then chain to the previous handler or keep the default signal exit.
+- Delivery must remain safe to retry. Both backends skip rows at or below the highest stored `_seq` for each `_sid`; Cloudflare also uses a deterministic SHA-256 batch key.
 
 ### Portability must remain intact
 
@@ -113,7 +114,7 @@ Metric values are normalized to finite floats or `None`. Non-numeric values are 
 
 The default sender behavior is:
 
-- Flush every second.
+- Flush every 10 seconds in HTTP mode and every second in file mode.
 - Send chunks of up to 5,000 rows.
 - Retry transient failures with exponential backoff up to 30 seconds.
 - Treat 401, 408, and 429 as retryable client-side HTTP failures.

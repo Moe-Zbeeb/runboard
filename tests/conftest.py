@@ -9,6 +9,11 @@ def isolated_home(tmp_path, monkeypatch):
     for k in ("RUNBOARD_SERVER", "RUNBOARD_TOKEN", "RUNBOARD_DIR"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.chdir(tmp_path)
+    yield
+    from runboard import client
+
+    for run in list(client._live_runs):
+        run.finish(timeout=0)
 
 
 @pytest.fixture

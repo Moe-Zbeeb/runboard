@@ -37,6 +37,14 @@ def _reachable_host():
         return "127.0.0.1"
 
 
+def _claim_server_info(info):
+    current = config.read_server_info()
+    if current.get("url") and "dir" not in current:
+        return False
+    config.write_server_info(info)
+    return True
+
+
 def cmd_serve(args):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     token = config.get_or_create_token()
@@ -49,11 +57,16 @@ def cmd_serve(args):
         print(f"[runboard] port {args.port} busy; using {srv.port}", file=sys.stderr)
     srv.start()
     advertise = args.advertise or f"http://{_reachable_host()}:{srv.port}"
-    config.write_server_info({"url": advertise, "token": token, "dir": str(srv.storage.root)})
+    owns_config = _claim_server_info({"url": advertise, "token": token, "dir": str(srv.storage.root)})
     print(f"runboard serving {srv.storage.root}")
     print(f"  local:   http://127.0.0.1:{srv.port}/?token={token}")
     print(f"  cluster: {advertise}/?token={token}")
-    print(f"  (training jobs pick up the server from {config.home() / 'server.json'})")
+    if owns_config:
+        print(f"  (training jobs pick up the server from {config.home() / 'server.json'})")
+    else:
+        hosted = config.read_server_info().get("url")
+        print(f"  (training jobs keep sending to {hosted}, configured in {config.home() / 'server.json'};", file=sys.stderr)
+        print("   delete that file and restart `runboard serve` to switch them here)", file=sys.stderr)
     sys.stdout.flush()
 
     tunnel = None
@@ -66,9 +79,10 @@ def cmd_serve(args):
         public = f"{url}/?token={token}"
         print(f"  public:  {public}", flush=True)
         print("  (the public URL can take ~30s to start resolving)", flush=True)
-        info = config.read_server_info()
-        info["public_url"] = public
-        config.write_server_info(info)
+        if owns_config:
+            info = config.read_server_info()
+            info["public_url"] = public
+            config.write_server_info(info)
         if args.notify:
             _notify(args.notify, f"runboard dashboard: {public}")
         return t

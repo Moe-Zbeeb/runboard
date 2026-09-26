@@ -2,6 +2,7 @@ import atexit
 import json
 import os
 import secrets
+import signal
 import socket
 import sys
 import threading
@@ -12,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import config as _config
-from .storage import Storage, clean_row, valid_name
+from .storage import Storage, clean_meta, clean_row, valid_name
 
 
 def _warn(msg):
@@ -47,7 +48,7 @@ class _HttpSink:
             batch_meta, batch = pending.pop()
             payload = {"rows": batch}
             if batch_meta:
-                payload["meta"] = batch_meta
+                payload["meta"] = clean_meta(batch_meta)
             try:
                 post_json(self.server, self.token, project, run_id, payload)
             except urllib.error.HTTPError as e:
@@ -82,6 +83,36 @@ def _is_nonzero_rank():
     return False
 
 
+_live_runs = []
+_previous_sigterm = None
+_sigterm_installed = False
+
+
+def _on_sigterm(signum, frame):
+    for run in list(_live_runs):
+        run.finish("killed")
+    if callable(_previous_sigterm):
+        _previous_sigterm(signum, frame)
+        return
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _install_sigterm_handler():
+    global _previous_sigterm, _sigterm_installed
+    if _sigterm_installed or threading.current_thread() is not threading.main_thread():
+        return
+    try:
+        previous = signal.getsignal(signal.SIGTERM)
+        if previous is None or previous is signal.SIG_IGN:
+            return
+        signal.signal(signal.SIGTERM, _on_sigterm)
+    except (ValueError, OSError):
+        return
+    _previous_sigterm = previous
+    _sigterm_installed = True
+
+
 def spool_dir():
     return _config.home() / "spool"
 
@@ -98,7 +129,7 @@ class Run:
         dir=None,
         mode=None,
         tags=None,
-        flush_interval=1.0,
+        flush_interval=None,
         max_buffer=1_000_000,
         chunk_size=5000,
         all_ranks=False,
@@ -109,7 +140,6 @@ class Run:
             raise ValueError(f"invalid run_id {self.run_id!r}")
         self.name = name or self.run_id
         self.config = dict(config or {})
-        self.flush_interval = flush_interval
         self.max_buffer = max_buffer
         self.chunk_size = chunk_size
         self._send_lock = threading.Lock()
@@ -120,7 +150,7 @@ class Run:
         self._overflow = []
         self._pending_spools = []
         self._meta = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._stop = threading.Event()
         self._finished = False
         self._warned = False
@@ -128,6 +158,9 @@ class Run:
             self._sink, self.mode = _NullSink(), "disabled"
         else:
             self._sink, self.mode = self._resolve_sink(server, token, dir, mode)
+        if flush_interval is None:
+            flush_interval = 10.0 if self.mode == "http" else 1.0
+        self.flush_interval = flush_interval
         self._set_meta(
             name=self.name,
             config=self.config,
@@ -142,6 +175,9 @@ class Run:
         self._thread = threading.Thread(target=self._loop, name="runboard-sender", daemon=True)
         self._thread.start()
         atexit.register(self.finish)
+        if self.mode != "disabled":
+            _live_runs.append(self)
+            _install_sigterm_handler()
 
     def _resolve_sink(self, server, token, dir, mode):
         dir = dir or os.environ.get("RUNBOARD_DIR")
@@ -173,7 +209,7 @@ class Run:
 
     def _set_meta(self, **kw):
         with self._lock:
-            self._meta.update(kw)
+            self._meta.update(clean_meta(kw))
 
     def log(self, data, step=None):
         if self._finished:
@@ -204,7 +240,9 @@ class Run:
 
     def _restore(self, meta, rows):
         with self._lock:
-            self._overflow[:0] = rows
+            pending = rows + self._overflow + self._rows
+            cut = max(0, len(pending) - self.max_buffer)
+            self._overflow, self._rows = pending[:cut], pending[cut:]
             self._meta = {**meta, **self._meta}
 
     def _is_empty(self):
@@ -246,17 +284,45 @@ class Run:
                     self._warned = True
                 return False
 
+    def _forget_spool(self, path):
+        with self._lock:
+            if path in self._pending_spools:
+                self._pending_spools.remove(path)
+
     def _flush_spool(self, path):
         try:
             rec = json.loads(path.read_text())
+            if not isinstance(rec, dict) or not isinstance(rec.get("rows", []), list):
+                raise ValueError("not a spool record")
+        except FileNotFoundError:
+            _warn(f"spool file {path} disappeared (uploaded by `runboard sync`?); skipping it")
+            self._forget_spool(path)
+            return True
+        except ValueError as e:
+            bad = path.with_suffix(".jsonl.corrupt")
+            _warn(f"spool file {path} is unreadable ({e}); moved to {bad}")
+            try:
+                os.replace(path, bad)
+            except OSError:
+                pass
+            self._forget_spool(path)
+            return True
+        except OSError as e:
+            if not self._warned:
+                _warn(f"could not read spool file {path} ({e}); retrying")
+                self._warned = True
+            return False
+        try:
             rows = rec.get("rows", [])
             meta = rec.get("meta") or {}
             for i in range(0, max(len(rows), 1), self.chunk_size):
                 self._sink.send(self.project, self.run_id, meta, rows[i : i + self.chunk_size])
                 meta = {}
-            path.unlink()
-            with self._lock:
-                self._pending_spools.remove(path)
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            self._forget_spool(path)
             if self._warned:
                 _warn("connection restored")
                 self._warned = False
@@ -265,12 +331,10 @@ class Run:
             if 400 <= e.code < 500 and e.code not in (401, 408, 429):
                 _warn(f"server rejected spooled metrics ({e.code}: {e.reason}); dropping {path}")
                 try:
-                    path.unlink(missing_ok=True)
+                    path.unlink()
                 except OSError:
                     pass
-                with self._lock:
-                    if path in self._pending_spools:
-                        self._pending_spools.remove(path)
+                self._forget_spool(path)
                 return True
             if not self._warned:
                 _warn(f"could not send metrics ({e}); buffering and retrying")
@@ -307,7 +371,11 @@ class Run:
                 ok = self._flush_once()
             except Exception:
                 ok = False
-            delay = self.flush_interval if ok else min(delay * 2, 30.0)
+            if not ok:
+                delay = min(delay * 2, 30.0)
+            else:
+                with self._lock:
+                    delay = 0 if self._pending_spools else self.flush_interval
 
     def _spool(self, meta, rows):
         d = spool_dir()
@@ -330,16 +398,20 @@ class Run:
         if self._finished:
             return
         self._finished = True
+        if self in _live_runs:
+            _live_runs.remove(self)
         self._stop.set()
         self._thread.join(timeout=5)
         self._set_meta(status=status, finished=time.time())
         deadline = time.time() + timeout
         while True:
-            if self._flush_once() and self._is_empty():
+            ok = self._flush_once()
+            if ok and self._is_empty():
                 return
             if time.time() >= deadline:
                 break
-            time.sleep(1.0)
+            if not ok:
+                time.sleep(1.0)
         with self._send_lock:
             meta, rows = self._take()
         if rows or meta:
@@ -371,7 +443,11 @@ def sync(server=None, token=None, paths=None):
     files = [Path(p) for p in paths] if paths else sorted(spool_dir().glob("*.jsonl"))
     total = 0
     for p in files:
-        for line in p.read_text().splitlines():
+        try:
+            text = p.read_text()
+        except FileNotFoundError:
+            continue
+        for line in text.splitlines():
             if not line.strip():
                 continue
             rec = json.loads(line)
@@ -381,5 +457,8 @@ def sync(server=None, token=None, paths=None):
                 sink.send(rec["project"], rec["run_id"], meta, rows[i : i + 5000])
                 meta = None
             total += len(rows)
-        p.unlink()
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
     return total

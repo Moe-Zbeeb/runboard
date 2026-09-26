@@ -108,7 +108,13 @@ def make_handler(storage, token):
             if len(parts) != 4 or parts[:2] != ["api", "runs"]:
                 return self._send(404, {"error": "not found"})
             project, run_id = unquote(parts[2]), unquote(parts[3])
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length < 0:
+                self.close_connection = True
+                return self._send(400, {"error": "invalid Content-Length"})
             if length > MAX_BODY:
                 return self._send(413, {"error": "body too large"})
             try:

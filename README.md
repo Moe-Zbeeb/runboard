@@ -185,8 +185,9 @@ For local Worker development, copy `.dev.vars.example` to `.dev.vars`, replace i
 Cloudflare's free plan is enough for personal use and normal research runs, subject to its current
 [Workers](https://developers.cloudflare.com/workers/platform/pricing/),
 [D1](https://developers.cloudflare.com/d1/platform/pricing/) quotas. Large sweeps or very frequent logging can
-exceed those quotas. Runboard batches writes, but log at a useful interval instead of every inner-loop
-operation.
+exceed those quotas. Runboard batches writes and, in HTTP mode, sends at most one batch every 10 seconds
+per run by default (`flush_interval`). The dashboard polls every 5 seconds, pauses in hidden tabs, and only
+downloads metrics for runs that changed. Log at a useful interval instead of every inner-loop operation.
 
 ## Running on a cluster
 

@@ -29,9 +29,12 @@ D1 contains run metadata and JSON metric batches. The Worker limits requests to 
 client automatically splits larger batches when it receives HTTP 413. This stays below D1's 2 MB row
 limit while retaining one database write for thousands of training steps.
 
-Each metric batch receives a SHA-256 key derived from its project, run, and rows. `INSERT OR IGNORE`
-keeps one D1 record for repeated delivery. The browser treats the D1 batch ID as its incremental offset
-and downloads one new batch at a time.
+Like local storage, the Worker records the highest stored `_seq` for each `_sid` in the `run_sessions`
+table and skips rows it has already stored, so a retry that overlaps an earlier delivery does not create
+duplicates. The remaining rows receive a SHA-256 key derived from their project, run, and contents, and
+`INSERT OR IGNORE` keeps one D1 record for an identical repeated delivery. The batch insert and the
+sequence update run in one D1 transaction. The browser treats the D1 batch ID as its incremental offset;
+each metrics request returns up to 64 batches or about 4 MB.
 
 The Worker creates the schema with idempotent DDL when its first authenticated request arrives. D1 and
 static assets are declared without account-specific IDs in `wrangler.jsonc`, allowing Wrangler
@@ -62,7 +65,7 @@ Project and run names must match `[A-Za-z0-9._-]{1,128}`, which rules out path t
 
 1. `log()` appends to an in-memory list under a lock. Network and disk work run outside the training call.
    When the queue exceeds `max_buffer`, the background thread writes the oldest rows to spool files.
-2. A daemon thread flushes every `flush_interval` (1 s), sending the pending meta and rows in chunks
+2. A daemon thread flushes every `flush_interval` (10 s in HTTP mode, 1 s in file mode), sending the pending meta and rows in chunks
    of `chunk_size` (5,000) rows.
 3. On any exception the unsent remainder goes back to the front of the buffer, and the thread backs off
    exponentially (up to 30 s). A 4xx response other than 401, 408 or 429 is permanent, so those rows
@@ -73,6 +76,11 @@ Project and run names must match `[A-Za-z0-9._-]{1,128}`, which rules out path t
 5. `finish()`, which is also registered with `atexit`, stops the thread, retries for up to 10 s, then
    writes whatever is left to an atomic spool file in `~/.runboard/spool/`. `runboard sync` replays
    spool files; session sequence numbers make replaying safe.
+6. When the first run starts in the main thread, Runboard installs a `SIGTERM` handler, because Python
+   skips `atexit` on `SIGTERM` and Slurm sends it on `scancel` and time limits. The handler finishes
+   every live run with status `killed`, then calls the previously installed Python handler or, if there
+   was none, re-raises the default `SIGTERM` so the exit status is unchanged. Ignored or C-level
+   handlers are left alone.
 
 The tests cover retry after a lost connection, replay from spool, resumed runs, and duplicate batches.
 
@@ -89,8 +97,9 @@ or the `runboard_token` cookie.
 | `GET` | `/api/health` | `{"ok": true}` |
 | `GET` | `/` | Dashboard. `/?token=` sets the cookie and redirects to `/`. |
 
-The dashboard polls every 2 s rather than using server-sent events, because long-lived streams are
-unreliable through tunnels and proxies. Byte offsets keep each poll incremental.
+The dashboard polls every 5 s rather than using server-sent events, because long-lived streams are
+unreliable through tunnels and proxies. It pauses while the browser tab is hidden and only requests
+metrics for a run whose `status` or `updated` value changed. Offsets keep each poll incremental.
 
 ## Local tunnel
 
@@ -103,7 +112,8 @@ a clean shutdown so the tunnel process never outlives the server (Slurm sends `S
 
 ## Server discovery
 
-`runboard serve` writes `~/.runboard/server.json` (mode `600`):
+`runboard serve` writes `~/.runboard/server.json` (mode `600`) unless the file already holds a hosted
+server saved by `runboard configure`, which it leaves in place:
 
 ```json
 {"url": "http://login-node-3:8080", "token": "...", "dir": "/home/you/runboard-runs", "public_url": "https://..."}

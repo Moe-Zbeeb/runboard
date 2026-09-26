@@ -54,7 +54,7 @@ def test_cloudflare_dashboard_matches_python_package():
     cloudflare = root / "cloudflare" / "public"
     assert {path.name for path in packaged.iterdir()} == {path.name for path in cloudflare.iterdir()}
     for path in packaged.iterdir():
-        assert path.read_bytes().rstrip() == (cloudflare / path.name).read_bytes().rstrip()
+        assert path.read_bytes() == (cloudflare / path.name).read_bytes()
 
 
 def test_client_file_mode(tmp_path):

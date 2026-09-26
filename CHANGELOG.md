@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The dashboard has a new look: cool drafting-paper surfaces, the bundled Recursive typeface (SIL Open
   Font License), and a colorblind-validated run palette in light and dark themes. Each run in the sidebar
   shows a heartbeat trace of its metric writes over the last 15 minutes, so a stalled run visibly flatlines.
+- Charts draw point markers when a run has fewer than 60 values, so sparse metrics such as checkpoint
+  counters stay visible.
 - HTTP mode sends every 10 seconds by default instead of every second; file mode still flushes every
   second. Pass `flush_interval` to override.
 - The Worker returns up to 64 metric batches (about 4 MB) per `/api/metrics` request.

@@ -5,6 +5,7 @@
   const TRACE_S = 900;
   const TRACE_W = 180;
   const TRACE_BINS = 30;
+  const SPARSE_POINTS = 60;
 
   const state = {
     runs: new Map(),
@@ -343,11 +344,12 @@ runboard.finish()</pre>`);
       if (definition) binned = definition;
       if (xy && xy[0].length) { tables.push(xy); ks.push(k); steps.push(result?.step); }
     }
-    if (!tables.length) return { data: null, ks, binned, steps };
-    return { data: uPlot.join(tables), ks, binned, steps };
+    const sparse = tables.map((xy) => xy[1].filter((y) => y != null).length < SPARSE_POINTS);
+    if (!tables.length) return { data: null, ks, binned, steps, sparse };
+    return { data: uPlot.join(tables), ks, binned, steps, sparse };
   }
 
-  function makeOpts(ks, width, binned, steps) {
+  function makeOpts(ks, width, binned, steps, sparse) {
     const muted = css("--muted"), grid = css("--grid"), axis = css("--axis");
     const ax = { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: axis, width: 1, size: 4 }, font: "11px Recursive, system-ui, sans-serif" };
     return {
@@ -365,7 +367,7 @@ runboard.finish()</pre>`);
           stroke: colorOf(k),
           width: 2,
           spanGaps: true,
-          points: { show: Boolean(binned), size: 5 },
+          points: { show: Boolean(binned) || sparse[i], size: binned ? 5 : 7 },
           value: (u, v) => fmt(v),
         })),
       ],
@@ -432,10 +434,10 @@ runboard.finish()</pre>`);
           charts.set(m, c);
         }
         grid.appendChild(c.card);
-        const { data, ks, binned, steps } = chartData(m);
+        const { data, ks, binned, steps, sparse } = chartData(m);
         const plot = c.card.querySelector(".plot");
         const width = Math.max(200, plot.clientWidth || c.card.clientWidth - 24);
-        const sig = [ks.join("|"), ks.map((k) => state.slot.get(k)).join(","), state.xMode, state.logY, theme, width, binned?.prefix, steps.join(",")].join(";");
+        const sig = [ks.join("|"), ks.map((k) => state.slot.get(k)).join(","), state.xMode, state.logY, theme, width, binned?.prefix, steps.join(","), sparse.join(",")].join(";");
         if (!data) {
           c.u?.destroy(); c.u = null; c.sig = "";
           plot.innerHTML = `<p class="muted">No data for the selected runs.</p>`;
@@ -447,7 +449,7 @@ runboard.finish()</pre>`);
         } else {
           c.u?.destroy();
           plot.innerHTML = "";
-          const u = new uPlot(makeOpts(ks, width, binned, steps), data, plot);
+          const u = new uPlot(makeOpts(ks, width, binned, steps, sparse), data, plot);
           u.over.addEventListener("dblclick", () => { c.zoomed = false; });
           u.over.addEventListener("mouseenter", () => { c.hover = true; });
           u.over.addEventListener("mouseleave", () => { c.hover = false; setTimeout(() => showLatest(c), 0); });

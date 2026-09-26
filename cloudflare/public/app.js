@@ -2,6 +2,9 @@
   const MAX_SELECTED = 8;
   const POLL_MS = 5000;
   const STALE_S = 600;
+  const TRACE_S = 900;
+  const TRACE_W = 180;
+  const TRACE_BINS = 30;
 
   const state = {
     runs: new Map(),
@@ -18,6 +21,7 @@
     wide: new Set(),
   };
   const charts = new Map();
+  const beats = new Map();
   const $ = (id) => document.getElementById(id);
 
   const store = {
@@ -111,6 +115,39 @@
       .sort((a, b) => (b.created || 0) - (a.created || 0));
   }
 
+  function activity(k, r) {
+    const now = Date.now() / 1000, from = now - TRACE_S;
+    const bins = new Array(TRACE_BINS).fill(false);
+    const mark = (t) => {
+      if (t >= from && t <= now + 5) bins[Math.min(TRACE_BINS - 1, Math.floor(((t - from) / TRACE_S) * TRACE_BINS))] = true;
+    };
+    const d = state.data.get(k);
+    if (d) for (const s of d.series.values()) for (let i = s.t.length - 1; i >= 0 && s.t[i] >= from; i--) mark(s.t[i]);
+    for (const t of beats.get(k) || []) mark(t);
+    return bins;
+  }
+
+  function tracePath(bins) {
+    const step = TRACE_W / TRACE_BINS;
+    let d = "M0 9";
+    bins.forEach((on, i) => {
+      if (!on) return;
+      const x = (i + 0.5) * step;
+      d += `L${(x - 1.4).toFixed(1)} 9L${(x - 0.4).toFixed(1)} 3L${(x + 0.6).toFixed(1)} 15L${(x + 1.4).toFixed(1)} 9`;
+    });
+    return d + `L${TRACE_W} 9`;
+  }
+
+  function updatePulses(runs) {
+    const items = $("runs").querySelectorAll("li[data-run]");
+    runs.forEach((r, i) => {
+      const li = items[i];
+      if (!li) return;
+      li.querySelector(".beat").setAttribute("d", tracePath(activity(key(r), r)));
+      li.querySelector(".ago").textContent = ago(r.updated);
+    });
+  }
+
   let lastRunsHtml = "";
   function renderRuns() {
     const ul = $("runs");
@@ -124,12 +161,16 @@
         const on = state.selected.includes(k);
         const st = statusOf(r);
         const full = !on && state.selected.length >= MAX_SELECTED;
-        return `<li>
+        return `<li data-run="${esc(k)}">
           <input type="checkbox" data-k="${esc(k)}" ${on ? "checked" : ""} ${full ? "disabled title='Up to 8 runs can be compared at once'" : ""} aria-label="Show ${esc(r.name)}">
           <span class="swatch" style="background:${on ? colorOf(k) : "transparent"}"></span>
           <span class="info">
             <button class="name" type="button" data-details="${esc(k)}" title="${esc(r.name)}">${esc(r.name)}</button>
-            <span class="sub"><span class="status ${st}">${STATUS_ICON[st] || "·"} ${st}</span><span>${esc(state.project ? "" : r.project)}</span><span>${ago(r.updated)}</span></span>
+            <span class="sub"><span class="status ${st}">${STATUS_ICON[st] || "·"} ${st}</span>${state.project ? "" : `<span>${esc(r.project)}</span>`}</span>
+          </span>
+          <span class="pulse ${st}" title="Metric writes over the last 15 minutes">
+            <svg viewBox="0 0 ${TRACE_W} 18" preserveAspectRatio="none" aria-hidden="true"><path class="base" d="M0 9H${TRACE_W}"/><path class="beat" d="M0 9H${TRACE_W}"/></svg>
+            <span class="ago"></span>
           </span>
         </li>`;
       }).join("");
@@ -138,16 +179,21 @@
       ul.innerHTML = html;
       lastRunsHtml = html;
     }
+    updatePulses(runs);
     $("sel-count").textContent = `${state.selected.length} selected (max ${MAX_SELECTED})`;
   }
 
   async function refreshRuns() {
     const list = await api("/api/runs");
     const seen = new Set();
+    const cutoff = Date.now() / 1000 - TRACE_S;
     for (const r of list) {
       const k = key(r);
       seen.add(k);
       state.runs.set(k, r);
+      const history = (beats.get(k) || []).filter((t) => t >= cutoff);
+      if (r.updated && history[history.length - 1] !== r.updated) history.push(r.updated);
+      beats.set(k, history);
     }
     for (const k of [...state.runs.keys()]) if (!seen.has(k)) state.runs.delete(k);
     state.selected.filter((k) => !state.runs.has(k)).forEach((k) => select(k, false));
@@ -303,7 +349,7 @@ runboard.finish()</pre>`);
 
   function makeOpts(ks, width, binned, steps) {
     const muted = css("--muted"), grid = css("--grid"), axis = css("--axis");
-    const ax = { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: axis, width: 1, size: 4 }, font: "11px system-ui, sans-serif" };
+    const ax = { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: axis, width: 1, size: 4 }, font: "11px Recursive, system-ui, sans-serif" };
     return {
       width,
       height: 240,
@@ -431,7 +477,7 @@ runboard.finish()</pre>`);
         return `<td>${fmt(s.y[s.y.length - 1])}</td>`;
       }).join("");
       const st = statusOf(r || {});
-      return `<tr><td><span class="swatch" style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:${colorOf(k)}"></span>${esc(r?.name || k)}</td><td class="status ${st}">${STATUS_ICON[st] || ""} ${st}</td><td>${step ?? "–"}</td>${cells}</tr>`;
+      return `<tr><td><span class="swatch-line" style="background:${colorOf(k)}"></span>${esc(r?.name || k)}</td><td class="status ${st}">${STATUS_ICON[st] || ""} ${st}</td><td>${step ?? "–"}</td>${cells}</tr>`;
     }).join("");
     t.innerHTML = `<thead>${head}</thead><tbody>${rows}</tbody>`;
   }
@@ -449,6 +495,7 @@ runboard.finish()</pre>`);
     try {
       await refreshRuns();
       const changed = await refreshData();
+      updatePulses(visibleRuns());
       const sig = JSON.stringify([...state.runs.values()].map((r) => [key(r), r.status, r.name]));
       if (changed || sig !== lastRunsSig || !charts.size) redraw();
       lastRunsSig = sig;
@@ -520,6 +567,7 @@ runboard.finish()</pre>`);
     let rt;
     window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });
     document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+    if (document.fonts) document.fonts.load("11px Recursive").then(() => { for (const c of charts.values()) c.sig = ""; redraw(); }).catch(() => {});
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { renderRuns(); redraw(); });
   }
 

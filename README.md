@@ -333,3 +333,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ## License
 
 [MIT](LICENSE). Bundles [uPlot](https://github.com/leeoniya/uPlot) (MIT).
+
+### Binned relationship plots
+
+A run can declare `config.runboard_binned_charts` with entries containing `title`,
+`prefix`, `x_label` and optional `y` (default `mean`). Log numeric metrics named
+`<prefix>/bin_00/count`, `.../x_mean` and `.../mean` at the actual training step.
+The dashboard adds a relationship chart using the latest step's nonempty bins.
+It never mixes bins from older steps or applies time-series smoothing to these
+plots. A custom `y` such as `p50` can display a median series. Both hosted and local
+dashboards use the same format; older dashboards continue to display the scalar
+metrics. These charts summarize bins; they are not raw scatter plots or box plots.
+
+Raw bin-series cards are hidden when the metric filter is empty. Enter a filter
+such as `bin_` to inspect their counts and individual values. Relationship legends
+include each run's source step, so comparisons across runs do not imply identical
+training progress. The mean and quantile fields must share a common step with the
+bin count and x value; missing values are omitted rather than borrowed from a
+previous step. Run the JavaScript contract check with `node tests/js/binned.test.cjs`.

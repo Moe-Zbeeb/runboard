@@ -253,11 +253,19 @@ runboard.finish()</pre>`);
     return [x, y];
   }
 
+  function binnedDefinition(k, metric) {
+    return RunboardBinned.definitions(state.runs.get(k)?.config).find((item) => "relationships/" + item.title === metric);
+  }
+
   function metricNames() {
     const names = new Set();
     for (const k of state.selected) {
       const d = state.data.get(k);
-      if (d) for (const m of d.series.keys()) names.add(m);
+      if (d) for (const m of d.series.keys()) {
+        const detail = RunboardBinned.definitions(state.runs.get(k)?.config).some((item) => m.startsWith(item.prefix + "/bin_"));
+        if (!detail || state.metricFilter) names.add(m);
+      }
+      for (const definition of RunboardBinned.definitions(state.runs.get(k)?.config)) names.add("relationships/" + definition.title);
     }
     let re = null;
     try { re = state.metricFilter ? new RegExp(state.metricFilter, "i") : null; } catch { re = null; }
@@ -270,16 +278,21 @@ runboard.finish()</pre>`);
   }
 
   function chartData(m) {
-    const tables = [], ks = [];
+    const tables = [], ks = [], steps = [];
+    let binned = null;
     for (const k of state.selected) {
-      const xy = xyFor(k, m);
-      if (xy && xy[0].length) { tables.push(xy); ks.push(k); }
+      const definition = binnedDefinition(k, m);
+      const result = definition && state.data.get(k) ? RunboardBinned.latestXY(state.data.get(k).series, definition) : null;
+      let xy = definition ? result?.data : xyFor(k, m);
+      if (definition && state.logY && xy) xy = [xy[0], xy[1].map((y) => y > 0 ? y : null)];
+      if (definition) binned = definition;
+      if (xy && xy[0].length) { tables.push(xy); ks.push(k); steps.push(result?.step); }
     }
-    if (!tables.length) return { data: null, ks };
-    return { data: uPlot.join(tables), ks };
+    if (!tables.length) return { data: null, ks, binned, steps };
+    return { data: uPlot.join(tables), ks, binned, steps };
   }
 
-  function makeOpts(ks, width) {
+  function makeOpts(ks, width, binned, steps) {
     const muted = css("--muted"), grid = css("--grid"), axis = css("--axis");
     const ax = { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: axis, width: 1, size: 4 }, font: "11px system-ui, sans-serif" };
     return {
@@ -287,17 +300,17 @@ runboard.finish()</pre>`);
       height: 240,
       pxAlign: false,
       cursor: { drag: { x: true, y: false }, points: { size: 8 } },
-      scales: { x: { time: state.xMode === "wall" }, y: { distr: state.logY ? 3 : 1 } },
+      scales: { x: { time: !binned && state.xMode === "wall" }, y: { distr: state.logY ? 3 : 1 } },
       axes: [{ ...ax }, { ...ax, size: axisSize, values: (u, vals) => vals.map(tick) }],
       legend: { live: true },
       series: [
-        { label: state.xMode === "step" ? "step" : state.xMode === "rel" ? "min" : "time", value: state.xMode === "wall" ? undefined : (u, v) => fmt(v) },
-        ...ks.map((k) => ({
-          label: state.runs.get(k)?.name || k,
+        { label: binned ? binned.x_label : state.xMode === "step" ? "step" : state.xMode === "rel" ? "min" : "time", value: !binned && state.xMode === "wall" ? undefined : (u, v) => fmt(v) },
+        ...ks.map((k, i) => ({
+          label: (state.runs.get(k)?.name || k) + (binned ? " (step " + steps[i] + ")" : ""),
           stroke: colorOf(k),
           width: 2,
           spanGaps: true,
-          points: { show: false },
+          points: { show: Boolean(binned), size: 5 },
           value: (u, v) => fmt(v),
         })),
       ],
@@ -364,10 +377,10 @@ runboard.finish()</pre>`);
           charts.set(m, c);
         }
         grid.appendChild(c.card);
-        const { data, ks } = chartData(m);
+        const { data, ks, binned, steps } = chartData(m);
         const plot = c.card.querySelector(".plot");
         const width = Math.max(200, plot.clientWidth || c.card.clientWidth - 24);
-        const sig = [ks.join("|"), ks.map((k) => state.slot.get(k)).join(","), state.xMode, state.logY, theme, width].join(";");
+        const sig = [ks.join("|"), ks.map((k) => state.slot.get(k)).join(","), state.xMode, state.logY, theme, width, binned?.prefix, steps.join(",")].join(";");
         if (!data) {
           c.u?.destroy(); c.u = null; c.sig = "";
           plot.innerHTML = `<p class="muted">No data for the selected runs.</p>`;
@@ -379,7 +392,7 @@ runboard.finish()</pre>`);
         } else {
           c.u?.destroy();
           plot.innerHTML = "";
-          const u = new uPlot(makeOpts(ks, width), data, plot);
+          const u = new uPlot(makeOpts(ks, width, binned, steps), data, plot);
           u.over.addEventListener("dblclick", () => { c.zoomed = false; });
           u.over.addEventListener("mouseenter", () => { c.hover = true; });
           u.over.addEventListener("mouseleave", () => { c.hover = false; setTimeout(() => showLatest(c), 0); });
@@ -504,4 +517,3 @@ runboard.finish()</pre>`);
   poll();
   setInterval(poll, POLL_MS);
 })();
-

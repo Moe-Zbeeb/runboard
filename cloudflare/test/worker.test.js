@@ -94,3 +94,22 @@ test("concurrent overlapping retries store each row once", { skip: !base }, asyn
   }
   assert.deepEqual(seen, Array.from({ length: 20 }, (_, seq) => seq));
 });
+
+test("stores rows without a client session", { skip: !base }, async () => {
+  const runId = `test-nosid-${Date.now()}`;
+  const result = await api(`/api/runs/test/${runId}`, { method: "POST", body: JSON.stringify({ rows: [{ v: 1, _step: 0 }] }) });
+  assert.equal(result.status, 200);
+  const body = await (await api(`/api/metrics?project=test&run=${runId}&offset=0`)).json();
+  assert.deepEqual(body.rows.map((row) => row.v), [1]);
+});
+
+test("stores and deduplicates a batch with many client sessions", { skip: !base }, async () => {
+  const runId = `test-sessions-${Date.now()}`;
+  const rows = Array.from({ length: 120 }, (_, i) => ({ v: i, _step: i, _seq: 0, _sid: `session-${i}` }));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await api(`/api/runs/test/${runId}`, { method: "POST", body: JSON.stringify({ rows }) });
+    assert.equal(result.status, 200);
+  }
+  const body = await (await api(`/api/metrics?project=test&run=${runId}&offset=0`)).json();
+  assert.deepEqual(body.rows.map((row) => row.v), rows.map((row) => row.v));
+});

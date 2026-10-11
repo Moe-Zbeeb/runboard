@@ -103,14 +103,13 @@ function sessionOf(row) {
 
 async function unseenRows(env, project, runId, rows) {
   const sids = [...new Set(rows.map(sessionOf).filter((sid) => sid !== null))];
-  if (!sids.length) return { rows, sessions: new Map() };
-  const placeholders = sids.map(() => "?").join(", ");
-  const stored = await env.DB.prepare(`SELECT sid, last_seq FROM run_sessions WHERE project = ? AND run_id = ? AND sid IN (${placeholders})`)
-    .bind(project, runId, ...sids)
-    .all();
-  const last = new Map(stored.results.map((row) => [row.sid, row.last_seq]));
   const sessions = new Map();
   const first = new Map();
+  if (!sids.length) return { rows, sessions, first };
+  const stored = await env.DB.prepare("SELECT sid, last_seq FROM run_sessions WHERE project = ? AND run_id = ? AND sid IN (SELECT value FROM json_each(?))")
+    .bind(project, runId, JSON.stringify(sids))
+    .all();
+  const last = new Map(stored.results.map((row) => [row.sid, row.last_seq]));
   const fresh = [];
   for (const row of rows) {
     const sid = sessionOf(row);
@@ -130,16 +129,11 @@ async function storeRows(env, project, runId, rows, updated) {
     const fresh = await unseenRows(env, project, runId, rows);
     if (!fresh.rows.length) return;
     const batchKey = await hashRows(project, runId, fresh.rows);
-    const guards = [...fresh.first];
-    const guard = guards.length
-      ? ` WHERE NOT EXISTS (SELECT 1 FROM run_sessions WHERE project = ? AND run_id = ? AND (${guards.map(() => "(sid = ? AND last_seq >= ?)").join(" OR ")}))`
-      : "";
     const [inserted] = await env.DB.batch([
-      env.DB.prepare(`INSERT OR IGNORE INTO metric_batches (project, run_id, rows_json, row_count, created, batch_key) SELECT ?, ?, ?, ?, ?, ?${guard}`)
-        .bind(project, runId, JSON.stringify(fresh.rows), fresh.rows.length, updated, batchKey, ...(guards.length ? [project, runId, ...guards.flat()] : [])),
-      ...[...fresh.sessions].map(([sid, seq]) =>
-        env.DB.prepare("INSERT INTO run_sessions (project, run_id, sid, last_seq) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM metric_batches WHERE batch_key = ?) ON CONFLICT (project, run_id, sid) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq)")
-          .bind(project, runId, sid, seq, batchKey)),
+      env.DB.prepare("INSERT OR IGNORE INTO metric_batches (project, run_id, rows_json, row_count, created, batch_key) SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM run_sessions AS s, json_each(?) AS g WHERE s.project = ? AND s.run_id = ? AND s.sid = json_extract(g.value, '$[0]') AND s.last_seq >= json_extract(g.value, '$[1]'))")
+        .bind(project, runId, JSON.stringify(fresh.rows), fresh.rows.length, updated, batchKey, JSON.stringify([...fresh.first]), project, runId),
+      env.DB.prepare("INSERT INTO run_sessions (project, run_id, sid, last_seq) SELECT ?, ?, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?) WHERE EXISTS (SELECT 1 FROM metric_batches WHERE batch_key = ?) ON CONFLICT (project, run_id, sid) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq)")
+        .bind(project, runId, JSON.stringify([...fresh.sessions]), batchKey),
     ]);
     if (inserted.meta.changes) return;
     if (await env.DB.prepare("SELECT 1 FROM metric_batches WHERE batch_key = ?").bind(batchKey).first()) return;

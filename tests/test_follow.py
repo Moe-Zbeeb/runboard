@@ -2,10 +2,13 @@ import json
 import os
 import time
 
+import pytest
+
 from runboard.follow import Record, to_record
 from runboard.follow.csvfile import CsvFollower
 from runboard.follow.hf_state import HfStateFollower
 from runboard.follow.jsonl import JsonlFollower
+from runboard.follow.text import StreamFollower, TextFollower, parse_line
 
 
 def test_to_record_reads_step_time_and_metrics():
@@ -85,3 +88,37 @@ def test_hf_state_follows_newest_checkpoint_without_repeats(tmp_path):
 def test_hf_state_reads_a_direct_file(tmp_path):
     _write_state(tmp_path, [{"loss": 2.0, "step": 1}], time.time())
     assert HfStateFollower(tmp_path / "trainer_state.json").poll() == [Record(1, None, {"loss": 2.0})]
+
+
+METRIC_LINES = [
+    ("{'loss': 0.42, 'grad_norm': 1.5, 'learning_rate': 5e-05, 'epoch': 0.1}", Record(None, None, {"loss": 0.42, "grad_norm": 1.5, "learning_rate": 5e-05, "epoch": 0.1})),
+    ("step:12 - actor/loss:0.3 - critic/vf_loss:-0.1", Record(12, None, {"actor/loss": 0.3, "critic/vf_loss": -0.1})),
+    ("\x1b[32mINFO\x1b[0m step=7 loss=0.5", Record(7, None, {"loss": 0.5})),
+    (" 45%|####5     | 450/1000 [00:10<00:12, 43.2it/s, loss=0.3, lr=1e-4]", Record(None, None, {"loss": 0.3, "lr": 0.0001})),
+]
+
+
+@pytest.mark.parametrize("line,expected", METRIC_LINES)
+def test_parse_line_extracts_metrics(line, expected):
+    assert parse_line(line) == expected
+
+
+@pytest.mark.parametrize("line", ["Downloading model: 50%", "x = 5", "Running on http://127.0.0.1:8080", "Saved checkpoint to /tmp/model-3.pt", "version 1.2.3"])
+def test_parse_line_ignores_ordinary_output(line):
+    assert parse_line(line) is None
+
+
+def test_stream_follower_handles_partial_lines_and_carriage_returns():
+    stream = StreamFollower()
+    stream.feed(b"step=1 loss=0.5\rstep=2 lo")
+    assert stream.poll() == [Record(1, None, {"loss": 0.5})]
+    stream.feed(b"ss=0.25\nstep=3 loss=0.125")
+    assert stream.poll() == [Record(2, None, {"loss": 0.25})]
+    assert stream.poll(final=True) == [Record(3, None, {"loss": 0.125})]
+    assert stream.poll(final=True) == []
+
+
+def test_text_follower_reads_a_log_file(tmp_path):
+    path = tmp_path / "slurm-1.out"
+    path.write_text("step=1 loss=0.5\rstep=2 loss=0.25\nloading data\n")
+    assert TextFollower(path).poll() == [Record(1, None, {"loss": 0.5}), Record(2, None, {"loss": 0.25})]

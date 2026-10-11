@@ -11,7 +11,7 @@ class CsvFollower(LineFollower):
         self.header = (state or {}).get("header")
 
     def state(self):
-        return {"offset": self.offset, "header": self.header}
+        return dict(super().state(), header=self.header)
 
     def reset(self):
         super().reset()

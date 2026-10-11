@@ -1,6 +1,6 @@
 from helpers import tf_event, tf_record, tf_version_event
-from runboard.follow import Record
 from runboard.follow import tensorboard
+from runboard.follow import Record
 from runboard.follow.tensorboard import TensorBoardFollower, crc32c
 
 
@@ -53,3 +53,36 @@ def test_omitted_step_means_step_zero(tmp_path):
     path = tmp_path / "events.out.tfevents.5.host"
     path.write_bytes(tf_record(tf_event(0, 1.0, scalars=[("loss", 0.5)])))
     assert TensorBoardFollower(path).poll() == [Record(0, 1.0, {"loss": 0.5})]
+
+
+def test_add_scalars_directories_name_each_series(tmp_path):
+    torch_dir = tmp_path / "logs" / "loss_train"
+    tbx_dir = tmp_path / "logs" / "eval" / "acc"
+    plain_dir = tmp_path / "runs" / "exp"
+    for directory in (torch_dir, tbx_dir, plain_dir):
+        directory.mkdir(parents=True)
+    (torch_dir / "events.out.tfevents.1.h").write_bytes(tf_record(tf_event(1, 1.0, scalars=[("loss", 0.5)])))
+    (tbx_dir / "events.out.tfevents.1.h").write_bytes(tf_record(tf_event(1, 1.0, scalars=[("eval", 0.25)])))
+    (plain_dir / "events.out.tfevents.1.h").write_bytes(tf_record(tf_event(1, 1.0, scalars=[("train/loss", 0.125)])))
+    assert TensorBoardFollower(torch_dir / "events.out.tfevents.1.h").poll() == [Record(1, 1.0, {"loss/train": 0.5})]
+    assert TensorBoardFollower(tbx_dir / "events.out.tfevents.1.h").poll() == [Record(1, 1.0, {"eval/acc": 0.25})]
+    assert TensorBoardFollower(plain_dir / "events.out.tfevents.1.h").poll() == [Record(1, 1.0, {"train/loss": 0.125})]
+
+
+def test_only_scalar_events_pay_for_data_checksums(tmp_path, monkeypatch):
+    path = tmp_path / "events.out.tfevents.6.host"
+    path.write_bytes(tf_record(bytes(500)) + tf_record(tf_event(2, 2.0, scalars=[("loss", 0.5)])))
+    sizes = []
+    original = tensorboard.crc32c
+    monkeypatch.setattr(tensorboard, "crc32c", lambda data: sizes.append(len(data)) or original(data))
+    assert TensorBoardFollower(path).poll() == [Record(2, 2.0, {"loss": 0.5})]
+    assert max(sizes) < 500
+
+
+def test_poll_stops_at_the_byte_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(tensorboard, "MAX_BYTES_PER_POLL", 1)
+    path = tmp_path / "events.out.tfevents.7.host"
+    path.write_bytes(tf_record(tf_event(1, 1.0, scalars=[("loss", 0.5)])) + tf_record(tf_event(2, 2.0, scalars=[("loss", 0.25)])))
+    follower = TensorBoardFollower(path)
+    assert follower.poll() == [Record(1, 1.0, {"loss": 0.5})]
+    assert follower.poll() == [Record(2, 2.0, {"loss": 0.25})]

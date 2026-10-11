@@ -10,6 +10,8 @@ Record = namedtuple("Record", "step time metrics")
 STEP_KEYS = ("step", "global_step", "_step", "iteration", "iter")
 TIME_KEYS = ("time", "timestamp", "_time", "wall_time")
 MAX_READ = 8 * 1024 * 1024
+HEAD = 64
+WALL_TIME = (946684800.0, 4102444800.0)
 
 
 def _number(value):
@@ -42,12 +44,18 @@ def flatten(values, prefix=""):
     return out
 
 
+def _wall_time(value):
+    number = _number(value)
+    return number is not None and WALL_TIME[0] <= number <= WALL_TIME[1]
+
+
 def to_record(values):
     step = _first(values, STEP_KEYS)
-    when = _first(values, TIME_KEYS)
+    times = [key for key in TIME_KEYS if key in values and _wall_time(values[key])]
+    when = float(values[times[0]]) if times else None
     metrics = {}
     for key, value in values.items():
-        if not isinstance(key, str) or key in STEP_KEYS or key in TIME_KEYS or key.startswith("_"):
+        if not isinstance(key, str) or key in STEP_KEYS or key in times or key.startswith("_"):
             continue
         cleaned = clean_value(value)
         if cleaned is not ...:
@@ -59,11 +67,14 @@ def to_record(values):
 
 class LineFollower:
     def __init__(self, path, state=None):
+        state = state or {}
         self.path = Path(path)
-        self.offset = int((state or {}).get("offset", 0))
+        self.offset = int(state.get("offset", 0))
+        self.head = bytes.fromhex(state.get("head", ""))
+        self.rewound = False
 
     def state(self):
-        return {"offset": self.offset}
+        return {"offset": self.offset, "head": self.head.hex()}
 
     def reset(self):
         self.offset = 0
@@ -71,8 +82,14 @@ class LineFollower:
     def read_lines(self):
         try:
             with open(self.path, "rb") as f:
-                if os.fstat(f.fileno()).st_size < self.offset:
+                size = os.fstat(f.fileno()).st_size
+                head = f.read(min(HEAD, size))
+                if size < self.offset:
                     self.reset()
+                elif head[: len(self.head)] != self.head:
+                    self.reset()
+                    self.rewound = True
+                self.head = head
                 f.seek(self.offset)
                 data = f.read(MAX_READ)
         except OSError:

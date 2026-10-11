@@ -8,6 +8,7 @@ from . import Record
 
 MAX_RECORD = 1024 * 1024
 MAX_RECORDS_PER_POLL = 100000
+MAX_BYTES_PER_POLL = 64 * 1024 * 1024
 DT_FLOAT = 1
 DT_DOUBLE = 2
 
@@ -129,6 +130,16 @@ class TensorBoardFollower:
     def state(self):
         return {"offset": self.offset}
 
+    def _name(self, tag):
+        directory = self.path.parent
+        flat = tag.replace("/", "_") + "_"
+        if directory.name.startswith(flat) and len(directory.name) > len(flat):
+            return f"{tag}/{directory.name[len(flat):]}"
+        parts = tag.split("/")
+        if len(directory.parent.parts) >= len(parts) and list(directory.parent.parts[-len(parts):]) == parts:
+            return f"{tag}/{directory.name}"
+        return tag
+
     def _warn(self, message):
         if not self.warned:
             print(f"[runboard] {self.path}: {message}", file=sys.stderr, flush=True)
@@ -143,9 +154,9 @@ class TensorBoardFollower:
                 size = os.fstat(f.fileno()).st_size
                 if size < self.offset:
                     self.offset = 0
-                pos = self.offset
+                pos = start = self.offset
                 for _ in range(MAX_RECORDS_PER_POLL):
-                    if pos + 12 > size:
+                    if pos + 12 > size or pos - start >= MAX_BYTES_PER_POLL:
                         break
                     f.seek(pos)
                     head = f.read(12)
@@ -165,15 +176,16 @@ class TensorBoardFollower:
                     payload = f.read(length)
                     tail = f.read(4)
                     pos = end
-                    if len(tail) < 4 or masked_crc32c(payload) != struct.unpack("<I", tail)[0]:
-                        self._warn("skipped a record with a bad checksum")
-                        continue
                     try:
                         record = parse_event(payload)
                     except (ValueError, IndexError, struct.error):
+                        record = None
+                    if record is None:
                         continue
-                    if record:
-                        records.append(record)
+                    if len(tail) < 4 or masked_crc32c(payload) != struct.unpack("<I", tail)[0]:
+                        self._warn("skipped a record with a bad checksum")
+                        continue
+                    records.append(Record(record.step, record.time, {self._name(tag): value for tag, value in record.metrics.items()}))
                 self.offset = pos
         except OSError:
             return records

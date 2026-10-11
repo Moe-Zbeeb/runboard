@@ -13,7 +13,7 @@ from runboard.follow.text import StreamFollower, TextFollower, parse_line
 
 
 def test_to_record_reads_step_time_and_metrics():
-    assert to_record({"global_step": 4, "wall_time": 10.5, "loss": "0.5", "name": "x", "_hidden": 1}) == Record(4, 10.5, {"loss": 0.5})
+    assert to_record({"global_step": 4, "wall_time": 1791746544.5, "loss": "0.5", "name": "x", "_hidden": 1}) == Record(4, 1791746544.5, {"loss": 0.5})
     assert to_record({"step": 1, "note": "text"}) is None
 
 
@@ -166,3 +166,43 @@ def test_scan_stops_at_the_file_limit_and_deduplicates_roots(tmp_path):
     assert len(scan([tmp_path], max_files=2)["table"]) == 2
     assert len(scan([tmp_path, tmp_path / "logs"])["table"]) == 3
     assert best(scan([tmp_path / "missing"])) == (None, [])
+
+
+def test_csv_follower_rereads_a_file_rewritten_with_a_wider_header(tmp_path):
+    path = tmp_path / "metrics.csv"
+    path.write_text("step,loss\n1,0.5\n2,0.4\n")
+    follower = CsvFollower(path)
+    follower.poll()
+    path.write_text("step,loss,val_loss\n1,0.5,\n2,0.4,\n3,0.3,0.9\n")
+    assert follower.poll() == [Record(1, None, {"loss": 0.5}), Record(2, None, {"loss": 0.4}), Record(3, None, {"loss": 0.3, "val_loss": 0.9})]
+    assert follower.rewound
+
+
+def test_truncation_is_not_reported_as_a_rewrite(tmp_path):
+    path = tmp_path / "metrics.jsonl"
+    path.write_text('{"step": 1, "loss": 1}\n{"step": 2, "loss": 2}\n')
+    follower = JsonlFollower(path)
+    follower.poll()
+    path.write_text('{"step": 1, "loss": 9}\n')
+    follower.poll()
+    assert not follower.rewound
+
+
+def test_to_record_keeps_implausible_times_as_metrics():
+    assert to_record({"step": 3, "time": 0.53, "loss": 1}) == Record(3, None, {"time": 0.53, "loss": 1.0})
+    assert to_record({"step": 3, "timestamp": 1791746544123, "loss": 1}) == Record(3, None, {"timestamp": 1791746544123.0, "loss": 1.0})
+    assert to_record({"step": 3, "time": 1791746544.5, "loss": 1}) == Record(3, 1791746544.5, {"loss": 1.0})
+
+
+def test_scan_skips_runboard_storage_and_excluded_paths(tmp_path):
+    _touch(tmp_path / "runboard-runs/p/r/metrics.jsonl")
+    _touch(tmp_path / "store/p/r/metrics.jsonl")
+    _touch(tmp_path / "logs/metrics.jsonl")
+    assert scan([tmp_path], exclude=[tmp_path / "store"])["table"] == [(tmp_path / "logs/metrics.jsonl").resolve()]
+
+
+def test_scan_stops_after_visiting_too_many_directories(tmp_path):
+    for index in range(30):
+        (tmp_path / f"data/{index:02d}").mkdir(parents=True)
+    _touch(tmp_path / "zz/metrics.jsonl")
+    assert scan([tmp_path], max_dirs=10)["table"] == []

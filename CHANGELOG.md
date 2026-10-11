@@ -22,6 +22,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A transient send failure keeps rows in memory instead of writing them to spool files below
   `max_buffer`, and pending spool files are uploaded back to back.
 - The local server returns 400 for a negative or malformed `Content-Length`.
+- A send failure right after a spool file uploads now backs off instead of retrying in a tight loop that
+  used a full CPU core and flooded the server with requests.
+- `finish()` stops sending at its `timeout` and spools the remaining rows, so a slow connection and a
+  large backlog no longer stretch shutdown past Slurm's kill grace period.
+- A status-only spool file written by `finish()` no longer overwrites a pending spool file whose first row
+  had sequence number 0.
+- `~/.runboard/token` and `~/.runboard/server.json` are created with mode `600` instead of being
+  briefly readable by other users before `chmod`.
+- The Cloudflare Worker no longer stores duplicate rows when a timed-out request and its retry are
+  processed concurrently.
+- The dashboard escapes run status values.
+- The local server closes the connection after rejecting an oversized request body.
 
 ### Changed
 

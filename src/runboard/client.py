@@ -249,12 +249,17 @@ class Run:
         with self._lock:
             return not (self._pending_spools or self._overflow or self._rows or self._meta)
 
-    def _flush_once(self):
+    def _out_of_time(self, deadline):
+        if deadline is None:
+            return self._stop.is_set()
+        return time.time() >= deadline
+
+    def _flush_once(self, deadline=None):
         with self._send_lock:
             with self._lock:
                 pending_spool = self._pending_spools[0] if self._pending_spools else None
             if pending_spool is not None:
-                return self._flush_spool(pending_spool)
+                return self._flush_spool(pending_spool, deadline)
             meta, rows = self._take()
             if not meta and not rows:
                 return True
@@ -273,6 +278,9 @@ class Run:
                     sent += len(chunk)
                     if sent >= len(rows):
                         break
+                    if self._out_of_time(deadline):
+                        self._restore(meta, rows[sent:])
+                        return True
                 if self._warned:
                     _warn("connection restored")
                     self._warned = False
@@ -289,7 +297,7 @@ class Run:
             if path in self._pending_spools:
                 self._pending_spools.remove(path)
 
-    def _flush_spool(self, path):
+    def _flush_spool(self, path, deadline=None):
         try:
             rec = json.loads(path.read_text())
             if not isinstance(rec, dict) or not isinstance(rec.get("rows", []), list):
@@ -318,6 +326,8 @@ class Run:
             for i in range(0, max(len(rows), 1), self.chunk_size):
                 self._sink.send(self.project, self.run_id, meta, rows[i : i + self.chunk_size])
                 meta = {}
+                if i + self.chunk_size < len(rows) and self._out_of_time(deadline):
+                    return True
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -372,7 +382,7 @@ class Run:
             except Exception:
                 ok = False
             if not ok:
-                delay = min(delay * 2, 30.0)
+                delay = min(max(delay * 2, self.flush_interval), 30.0)
             else:
                 with self._lock:
                     delay = 0 if self._pending_spools else self.flush_interval
@@ -380,7 +390,7 @@ class Run:
     def _spool(self, meta, rows):
         d = spool_dir()
         d.mkdir(parents=True, exist_ok=True)
-        first_seq = rows[0].get("_seq", 0) if rows else 0
+        first_seq = rows[0].get("_seq", 0) if rows else self._seq
         p = d / f"{self.project[:48]}__{self.run_id[:48]}__{self._sid}__{first_seq:020d}.jsonl"
         tmp = p.with_suffix(".jsonl.tmp")
         tmp.write_text(json.dumps({"project": self.project, "run_id": self.run_id, "meta": meta, "rows": rows}, default=str) + "\n")
@@ -405,7 +415,7 @@ class Run:
         self._set_meta(status=status, finished=time.time())
         deadline = time.time() + timeout
         while True:
-            ok = self._flush_once()
+            ok = self._flush_once(deadline)
             if ok and self._is_empty():
                 return
             if time.time() >= deadline:

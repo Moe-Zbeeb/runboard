@@ -340,3 +340,76 @@ def test_background_sender_drains_spools_back_to_back(server):
     run._seq = 4
     assert wait_for(lambda: len(server.storage.read_rows("p", run.run_id)[0]) == 4, timeout=3.5)
     run.finish()
+
+
+def test_failure_after_spool_flush_backs_off(tmp_path):
+    import urllib.error
+
+    class Limited:
+        calls = 0
+
+        def send(self, project, run_id, meta, rows):
+            Limited.calls += 1
+            if Limited.calls > 1:
+                raise urllib.error.HTTPError("http://x", 429, "Too Many Requests", {}, None)
+
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=0.2)
+    run._sink = Limited()
+    for i in range(2):
+        run._pending_spools.append(run._spool({}, [{"v": i, "_seq": i, "_sid": run._sid}]))
+    time.sleep(1.5)
+    attempts = Limited.calls
+    run.finish(timeout=0)
+    assert attempts < 10
+
+
+def test_finish_stops_sending_at_deadline(tmp_path):
+    class Slow:
+        got = []
+
+        def send(self, project, run_id, meta, rows):
+            time.sleep(0.2)
+            Slow.got += rows
+
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=60, chunk_size=1)
+    run._sink = Slow()
+    for i in range(50):
+        run.log({"v": i})
+    t0 = time.time()
+    run.finish(timeout=0.5)
+    assert time.time() - t0 < 2
+    spooled = [json.loads(p.read_text()) for p in (config.home() / "spool").glob("*.jsonl")]
+    sent = [r["v"] for r in Slow.got]
+    unsent = [r["v"] for rec in spooled for r in rec["rows"]]
+    assert sorted(sent + unsent) == list(range(50)) and unsent
+
+
+def test_meta_only_finish_spool_keeps_existing_spool(tmp_path):
+    class Down:
+        def send(self, project, run_id, meta, rows):
+            raise OSError("down")
+
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=60)
+    run._sink = Down()
+    run.log({"v": 0})
+    meta, rows = run._take()
+    run._pending_spools.append(run._spool({}, rows))
+    run._meta = meta
+    run.finish(timeout=0)
+    records = [json.loads(p.read_text()) for p in (config.home() / "spool").glob("*.jsonl")]
+    assert [r["v"] for rec in records for r in rec["rows"]] == [0]
+    assert any(rec["meta"].get("status") == "finished" for rec in records)
+
+
+def test_secret_files_are_created_private(monkeypatch):
+    import os
+
+    monkeypatch.setattr(os, "chmod", lambda *a, **k: None)
+    old = os.umask(0)
+    try:
+        config.get_or_create_token()
+        config.write_server_info({"url": "http://x", "token": "t"})
+    finally:
+        os.umask(old)
+    for name in ("token", "server.json"):
+        assert (config.home() / name).stat().st_mode & 0o777 == 0o600

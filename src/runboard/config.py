@@ -8,24 +8,27 @@ def home():
     return Path(os.environ.get("RUNBOARD_HOME", "~/.runboard")).expanduser()
 
 
+def _write_private(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        os.fchmod(f.fileno(), 0o600)
+        f.write(text)
+
+
 def get_or_create_token():
     p = home() / "token"
     if p.exists():
         t = p.read_text().strip()
         if t:
             return t
-    p.parent.mkdir(parents=True, exist_ok=True)
     t = secrets.token_urlsafe(24)
-    p.write_text(t)
-    os.chmod(p, 0o600)
+    _write_private(p, t)
     return t
 
 
 def write_server_info(info):
-    p = home() / "server.json"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(info, indent=2))
-    os.chmod(p, 0o600)
+    _write_private(home() / "server.json", json.dumps(info, indent=2))
 
 
 def read_server_info():

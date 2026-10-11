@@ -116,6 +116,7 @@ def make_handler(storage, token):
                 self.close_connection = True
                 return self._send(400, {"error": "invalid Content-Length"})
             if length > MAX_BODY:
+                self.close_connection = True
                 return self._send(413, {"error": "body too large"})
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")

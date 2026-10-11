@@ -41,3 +41,21 @@ def test_server_rejects_bad_content_length(server):
         conn.endheaders()
         assert conn.getresponse().status == 400
         conn.close()
+
+
+def test_server_closes_connection_after_oversized_body(server):
+    import socket
+
+    from runboard.server import MAX_BODY
+
+    with socket.create_connection(("127.0.0.1", server.port), timeout=2) as sock:
+        sock.sendall(
+            f"POST /api/runs/p/r HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer secret\r\nContent-Length: {MAX_BODY + 1}\r\n\r\n".encode()
+        )
+        data = b""
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    assert data.startswith(b"HTTP/1.1 413")

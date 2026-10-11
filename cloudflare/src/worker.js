@@ -110,6 +110,7 @@ async function unseenRows(env, project, runId, rows) {
     .all();
   const last = new Map(stored.results.map((row) => [row.sid, row.last_seq]));
   const sessions = new Map();
+  const first = new Map();
   const fresh = [];
   for (const row of rows) {
     const sid = sessionOf(row);
@@ -117,10 +118,33 @@ async function unseenRows(env, project, runId, rows) {
       const previous = sessions.has(sid) ? sessions.get(sid) : last.has(sid) ? last.get(sid) : -1;
       if (row._seq <= previous) continue;
       sessions.set(sid, row._seq);
+      if (!first.has(sid)) first.set(sid, row._seq);
     }
     fresh.push(row);
   }
-  return { rows: fresh, sessions };
+  return { rows: fresh, sessions, first };
+}
+
+async function storeRows(env, project, runId, rows, updated) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const fresh = await unseenRows(env, project, runId, rows);
+    if (!fresh.rows.length) return;
+    const batchKey = await hashRows(project, runId, fresh.rows);
+    const guards = [...fresh.first];
+    const guard = guards.length
+      ? ` WHERE NOT EXISTS (SELECT 1 FROM run_sessions WHERE project = ? AND run_id = ? AND (${guards.map(() => "(sid = ? AND last_seq >= ?)").join(" OR ")}))`
+      : "";
+    const [inserted] = await env.DB.batch([
+      env.DB.prepare(`INSERT OR IGNORE INTO metric_batches (project, run_id, rows_json, row_count, created, batch_key) SELECT ?, ?, ?, ?, ?, ?${guard}`)
+        .bind(project, runId, JSON.stringify(fresh.rows), fresh.rows.length, updated, batchKey, ...(guards.length ? [project, runId, ...guards.flat()] : [])),
+      ...[...fresh.sessions].map(([sid, seq]) =>
+        env.DB.prepare("INSERT INTO run_sessions (project, run_id, sid, last_seq) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM metric_batches WHERE batch_key = ?) ON CONFLICT (project, run_id, sid) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq)")
+          .bind(project, runId, sid, seq, batchKey)),
+    ]);
+    if (inserted.meta.changes) return;
+    if (await env.DB.prepare("SELECT 1 FROM metric_batches WHERE batch_key = ?").bind(batchKey).first()) return;
+  }
+  throw new Error("metric batch conflicted with concurrent writes");
 }
 
 async function updateRun(env, project, runId, meta, updated) {
@@ -166,20 +190,7 @@ async function postRun(request, env, project, runId) {
     return response({ error: error.message }, 400);
   }
   const updated = rows.reduce((latest, row) => Math.max(latest, Number(row._time) || 0), Date.now() / 1000);
-  const fresh = await unseenRows(env, project, runId, rows);
-  if (fresh.rows.length) {
-    const batchKey = await hashRows(project, runId, fresh.rows);
-    const exists = await env.DB.prepare("SELECT 1 FROM metric_batches WHERE batch_key = ?").bind(batchKey).first();
-    if (!exists) {
-      await env.DB.batch([
-        env.DB.prepare("INSERT OR IGNORE INTO metric_batches (project, run_id, rows_json, row_count, created, batch_key) VALUES (?, ?, ?, ?, ?, ?)")
-          .bind(project, runId, JSON.stringify(fresh.rows), fresh.rows.length, updated, batchKey),
-        ...[...fresh.sessions].map(([sid, seq]) =>
-          env.DB.prepare("INSERT INTO run_sessions (project, run_id, sid, last_seq) VALUES (?, ?, ?, ?) ON CONFLICT (project, run_id, sid) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq)")
-            .bind(project, runId, sid, seq)),
-      ]);
-    }
-  }
+  await storeRows(env, project, runId, rows, updated);
   await updateRun(env, project, runId, meta, updated);
   return response({ ok: true, n: rows.length });
 }

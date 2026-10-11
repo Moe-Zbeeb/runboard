@@ -167,9 +167,9 @@
           <span class="swatch" style="background:${on ? colorOf(k) : "transparent"}"></span>
           <span class="info">
             <button class="name" type="button" data-details="${esc(k)}" title="${esc(r.name)}">${esc(r.name)}</button>
-            <span class="sub"><span class="status ${st}">${STATUS_ICON[st] || "·"} ${st}</span>${state.project ? "" : `<span>${esc(r.project)}</span>`}</span>
+            <span class="sub"><span class="status ${esc(st)}">${STATUS_ICON[st] || "·"} ${esc(st)}</span>${state.project ? "" : `<span>${esc(r.project)}</span>`}</span>
           </span>
-          <span class="pulse ${st}" title="Metric writes over the last 15 minutes">
+          <span class="pulse ${esc(st)}" title="Metric writes over the last 15 minutes">
             <svg viewBox="0 0 ${TRACE_W} 18" preserveAspectRatio="none" aria-hidden="true"><path class="base" d="M0 9H${TRACE_W}"/><path class="beat" d="M0 9H${TRACE_W}"/></svg>
             <span class="ago"></span>
           </span>
@@ -479,7 +479,7 @@ runboard.finish()</pre>`);
         return `<td>${fmt(s.y[s.y.length - 1])}</td>`;
       }).join("");
       const st = statusOf(r || {});
-      return `<tr><td><span class="swatch-line" style="background:${colorOf(k)}"></span>${esc(r?.name || k)}</td><td class="status ${st}">${STATUS_ICON[st] || ""} ${st}</td><td>${step ?? "–"}</td>${cells}</tr>`;
+      return `<tr><td><span class="swatch-line" style="background:${colorOf(k)}"></span>${esc(r?.name || k)}</td><td class="status ${esc(st)}">${STATUS_ICON[st] || ""} ${esc(st)}</td><td>${step ?? "–"}</td>${cells}</tr>`;
     }).join("");
     t.innerHTML = `<thead>${head}</thead><tbody>${rows}</tbody>`;
   }

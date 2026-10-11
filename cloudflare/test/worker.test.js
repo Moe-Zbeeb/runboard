@@ -73,3 +73,24 @@ test("returns several batches per metrics page", { skip: !base }, async () => {
   const next = await (await api(`/api/metrics?project=test&run=${runId}&offset=${first.offset}`)).json();
   assert.deepEqual(next, { rows: [], offset: first.offset });
 });
+
+test("concurrent overlapping retries store each row once", { skip: !base }, async () => {
+  const runId = `test-race-${Date.now()}`;
+  const row = (seq) => ({ v: seq, _step: seq, _time: Date.now() / 1000, _seq: seq, _sid: "race-session" });
+  const prefix = (n) => Array.from({ length: n + 1 }, (_, seq) => row(seq));
+  const post = (n) => api(`/api/runs/test/${runId}`, { method: "POST", body: JSON.stringify({ rows: prefix(n) }) });
+  const results = await Promise.all(Array.from({ length: 20 }, (_, n) => post(n)));
+  for (const [n, result] of results.entries()) {
+    assert.ok([200, 503].includes(result.status));
+    if (result.status === 503) assert.equal((await post(n)).status, 200);
+  }
+  const seen = [];
+  let offset = 0;
+  for (let page = 0; page < 50; page++) {
+    const body = await (await api(`/api/metrics?project=test&run=${runId}&offset=${offset}`)).json();
+    if (!body.rows.length) break;
+    seen.push(...body.rows.map((item) => item.v));
+    offset = body.offset;
+  }
+  assert.deepEqual(seen, Array.from({ length: 20 }, (_, seq) => seq));
+});

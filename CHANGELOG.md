@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `runboard run -- <command>` streams a training job's existing TensorBoard, JSONL, CSV, Hugging Face
+  `trainer_state.json`, or printed metrics without code changes, and keeps the command's output and exit
+  code.
+- `runboard watch PATH` streams logs from a running job or uploads a finished run's logs; running it
+  again continues the same run without duplicates.
+- `runboard doctor` shows where metrics go, sends a test run, and prints `PASS` or `FAIL` with a fix.
+- `runboard guide` prints an integration guide for coding agents, also in `docs/integrating.md`.
+- `runboard ls` lists runs from the configured server; pass `--dir` for a local directory.
+
 ### Fixed
 
 - A spool file that disappeared or became unreadable no longer stops all later metric delivery; corrupt
@@ -34,6 +45,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   processed concurrently.
 - The dashboard escapes run status values.
 - The local server closes the connection after rejecting an oversized request body.
+- `runboard sync` replays spool files in the order they were written. Spool file names now include a
+  creation stamp.
+- The README states the actual dashboard refresh and HTTP send intervals.
 
 ### Changed
 

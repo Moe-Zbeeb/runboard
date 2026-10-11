@@ -8,7 +8,10 @@ runboard has a dependency-free Python client, two interchangeable backends, and 
 | `storage.py` | On-disk layout, append with de-duplication, incremental reads by byte offset |
 | `server.py` | `ThreadingHTTPServer` exposing the REST API and the static dashboard, token auth |
 | `tunnel.py` | Finds or downloads `cloudflared`, runs a quick tunnel, reports the public URL |
-| `cli.py` | `runboard configure / serve / ls / sync / url` |
+| `cli.py` | `runboard configure / serve / ls / sync / url / run / watch / doctor / guide` |
+| `runner.py` | `Streamer`, the `run` wrapper, and `watch`; follower state in `~/.runboard/followers/` |
+| `follow/` | TensorBoard, JSONL, CSV, Hugging Face state, and text followers; discovery |
+| `doctor.py` | Configuration report and write/read check |
 | `static/` | The dashboard: `index.html`, `app.js`, `style.css`, bundled uPlot |
 | `cloudflare/src/worker.js` | Hosted REST API, authentication, D1 storage, static assets |
 
@@ -123,3 +126,19 @@ server saved by `runboard configure`, which it leaves in place:
 (`RUNBOARD_SERVER`, `RUNBOARD_TOKEN`, `RUNBOARD_DIR`), then `server.json`. If no server is found, it
 falls back to writing files under `./runboard-runs`. The advertised host is the machine's hostname if it
 resolves, otherwise its primary IP. Override it with `--advertise`.
+
+## Log followers
+
+`runboard run` and `runboard watch` attach followers to an ordinary `Run`. A follower tails one source
+by byte offset (or `log_history` position for `trainer_state.json`) and returns complete records only.
+Discovery follows only the highest-priority format present: TensorBoard, then JSONL/CSV, then
+`trainer_state.json`, then command output. `runboard run` ignores files not modified since launch.
+
+Each source is its own client session. Its `_sid` is derived from a random nonce stored in
+`~/.runboard/followers/<project>__<run_id>.json`, the source format, and its absolute path, and each
+record's `_seq` is its index within that source. Re-reading a source reproduces the same records, so
+resuming from any saved position is deduplicated by the existing per-session rule. The state file is
+saved only when no send is in progress and the run's queue is empty.
+
+Spool files are named `<project>__<run_id>__<stamp>__<sid>__<first_seq>.jsonl` with a strictly
+increasing stamp, so `runboard sync` replays them in the order they were written.

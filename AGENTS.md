@@ -39,6 +39,7 @@ Local mode remains supported for offline clusters and development. It uses the s
 - `finish()` must attempt a bounded flush and spool any unsent data.
 - `SIGTERM` must finish live runs as `killed`, then chain to the previous handler or keep the default signal exit.
 - Delivery must remain safe to retry. Both backends skip rows at or below the highest stored `_seq` for each `_sid`; Cloudflare also uses a deterministic SHA-256 batch key.
+- `runboard run` must never change the wrapped command's output or exit code, and must still run the command when Runboard setup fails.
 
 ### Portability must remain intact
 
@@ -69,6 +70,7 @@ Every endpoint requires the same bearer token, query token, or dashboard cookie.
 - Update both copies in the same change.
 - `test_cloudflare_dashboard_matches_python_package` enforces this requirement.
 - Dashboard HTML requests `/static/*`. The Worker intentionally rewrites those paths to the root of the Cloudflare asset binding. Preserve that mapping.
+- `src/runboard/AGENT_GUIDE.md` and `docs/integrating.md` must stay byte-identical; `test_agent_guide_matches_docs_copy` enforces this.
 
 ### Cloudflare must stay free-tier compatible
 
@@ -89,7 +91,12 @@ Every endpoint requires the same bearer token, query token, or dashboard cookie.
 | `src/runboard/storage.py` | Local metadata and JSONL storage, validation, deduplication, and offsets. |
 | `src/runboard/server.py` | Authenticated local HTTP API and dashboard server. |
 | `src/runboard/tunnel.py` | Optional `cloudflared` quick-tunnel lifecycle. |
-| `src/runboard/cli.py` | `configure`, `serve`, `ls`, `sync`, `url`, and version commands. |
+| `src/runboard/cli.py` | `configure`, `serve`, `ls`, `sync`, `url`, `run`, `watch`, `doctor`, `guide`, and version commands. |
+| `src/runboard/runner.py` | `runboard run` wrapper, `runboard watch`, follower orchestration, and follower state. |
+| `src/runboard/follow/` | Dependency-free followers for TensorBoard, JSONL, CSV, Hugging Face state, and text output, plus discovery. |
+| `src/runboard/doctor.py` | `runboard doctor` configuration report and write/read check. |
+| `src/runboard/AGENT_GUIDE.md` | Integration guide for coding agents, printed by `runboard guide`. |
+| `docs/integrating.md` | Byte-identical copy of `AGENT_GUIDE.md`. |
 | `src/runboard/static/` | Dashboard source shipped in the wheel. |
 | `cloudflare/src/worker.js` | Hosted API, authentication, D1 access, and asset routing. |
 | `cloudflare/public/` | Cloudflare copy of the dashboard assets. |

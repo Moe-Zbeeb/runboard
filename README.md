@@ -40,6 +40,8 @@ need to host a server and the dashboard keeps the same URL when jobs, login node
 ## Contents
 
 - [Quickstart](#quickstart)
+- [Zero-code integration](#zero-code-integration)
+- [For coding agents](#for-coding-agents)
 - [How it works](#how-it-works)
 - [Logging API](#logging-api)
 - [Cloudflare deployment](#cloudflare-deployment)
@@ -87,11 +89,43 @@ for step in range(num_steps):
 runboard.finish()
 ```
 
-**4. Open the URL printed by `runboard configure`.** Charts update live every two seconds.
+**4. Open the URL printed by `runboard configure`.** The dashboard refreshes every 5 seconds.
 
 `runboard.init()` reads the saved endpoint automatically. On clusters with a shared home directory,
 configure it once and every compute node uses it. For containers or separate machines, set
 `RUNBOARD_SERVER` and `RUNBOARD_TOKEN` as environment variables.
+
+## Zero-code integration
+
+Already logging to TensorBoard, a JSONL or CSV file, the Hugging Face Trainer, or just printing
+`loss=...` lines? Put `runboard run --` in front of the launch command and leave the training code alone:
+
+```bash
+runboard run --project resnet -- python train.py --lr 3e-4
+runboard run --project llm -- torchrun --nproc_per_node 8 train.py
+```
+
+The wrapper starts the command, finds the metric files it writes in the current directory (add more
+with `--watch DIR`), and streams them to your dashboard. It prefers TensorBoard event files, then
+`*.jsonl` and `*metrics*.csv`, then Hugging Face `trainer_state.json`, and reads printed metrics only
+when none of those appear. Output and exit code pass through unchanged, and the run is marked
+`finished`, `crashed`, or `killed` from the exit code.
+
+To stream a job that is already running, or to upload a finished run's logs:
+
+```bash
+runboard watch ./outputs          # follow until Ctrl-C
+runboard watch ./outputs --once   # upload what exists and exit
+```
+
+Running `watch` again on the same path continues the same run without duplicating rows.
+
+## For coding agents
+
+`runboard guide` prints step-by-step integration instructions for coding agents such as Claude Code and
+Codex; the same text is in [docs/integrating.md](docs/integrating.md). In short: run `runboard doctor`
+(it ends with `PASS` or `FAIL` and a fix), put `runboard run --` in front of the launch command, and
+check that the wrapper's last line reports logged rows.
 
 ## How it works
 
@@ -106,10 +140,10 @@ configure it once and every compute node uses it. For containers or separate mac
 ```
 
 1. Your script appends metrics to an in-memory buffer. A background thread sends them to the
-   server once per second, in chunks of up to 5,000 rows.
+   server every 10 seconds (every second in local file mode), in chunks of up to 5,000 rows.
 2. The Cloudflare Worker authenticates the request and stores run metadata and metric batches in D1.
    Retried batches have deterministic IDs and are stored once.
-3. The dashboard is served by the same Worker. It polls every two seconds and fetches only batches it
+3. The dashboard is served by the same Worker. It polls every 5 seconds and fetches only batches it
    has not seen.
 4. If Cloudflare or the network is unavailable, the client retries with backoff and writes remaining
    data to `~/.runboard/spool/`. `runboard sync` sends it later.
@@ -261,6 +295,24 @@ or set `export RUNBOARD_DIR=~/runboard-runs` in your job script. The server pick
 - **Summary table.** Latest value of every metric for the selected runs.
 - A responsive layout for phones and desktops.
 
+### Binned relationship plots
+
+A run can declare `config.runboard_binned_charts` with entries containing `title`,
+`prefix`, `x_label` and optional `y` (default `mean`). Log numeric metrics named
+`<prefix>/bin_00/count`, `.../x_mean` and `.../mean` at the actual training step.
+The dashboard adds a relationship chart using the latest step's nonempty bins.
+It never mixes bins from older steps or applies time-series smoothing to these
+plots. A custom `y` such as `p50` can display a median series. Both hosted and local
+dashboards use the same format; older dashboards continue to display the scalar
+metrics. These charts summarize bins; they are not raw scatter plots or box plots.
+
+Raw bin-series cards are hidden when the metric filter is empty. Enter a filter
+such as `bin_` to inspect their counts and individual values. Relationship legends
+include each run's source step, so comparisons across runs do not imply identical
+training progress. The mean and quantile fields must share a common step with the
+bin count and x value; missing values are omitted rather than borrowed from a
+previous step. Run the JavaScript contract check with `node tests/js/binned.test.cjs`.
+
 ## Configuration
 
 | Environment variable | Default | Purpose |
@@ -275,8 +327,12 @@ or set `export RUNBOARD_DIR=~/runboard-runs` in your job script. The server pick
 | Command | Description |
 |---|---|
 | `runboard configure URL` | Verify and save a personal Cloudflare or other hosted endpoint. Prompts securely for its token; `--token` is available for automation. |
+| `runboard run [options] -- CMD` | Run a training command and stream the metrics it logs. Options: `--project`, `--name`, `--run-id`, `--watch DIR`, `--source FILE`, `--stdout auto\|on\|off`, `--config KEY=VALUE`, `--config-json FILE` |
+| `runboard watch [PATH…]` | Stream metrics from existing log files or directories. `--once` uploads and exits; `--stdout-file FILE` reads a text log |
+| `runboard doctor` | Show where metrics go, send a test run, and print `PASS` or `FAIL` with a fix |
+| `runboard guide` | Print the integration guide for coding agents |
 | `runboard serve` | Start the server. Options: `--dir` (default `./runboard-runs`), `--port` (default 8080, falls back to a free port if taken), `--host`, `--tunnel`, `--notify URL`, `--advertise URL` (address jobs should use) |
-| `runboard ls [--dir D]` | List runs with status and last update |
+| `runboard ls [--dir D] [--server URL]` | List runs on the configured server, or in a local directory |
 | `runboard sync [files…]` | Upload spooled offline metrics |
 | `runboard url` | Print the current dashboard URL |
 | `runboard --version` | Print the version |
@@ -334,21 +390,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ## License
 
 [MIT](LICENSE). Bundles [uPlot](https://github.com/leeoniya/uPlot) (MIT).
-
-### Binned relationship plots
-
-A run can declare `config.runboard_binned_charts` with entries containing `title`,
-`prefix`, `x_label` and optional `y` (default `mean`). Log numeric metrics named
-`<prefix>/bin_00/count`, `.../x_mean` and `.../mean` at the actual training step.
-The dashboard adds a relationship chart using the latest step's nonempty bins.
-It never mixes bins from older steps or applies time-series smoothing to these
-plots. A custom `y` such as `p50` can display a median series. Both hosted and local
-dashboards use the same format; older dashboards continue to display the scalar
-metrics. These charts summarize bins; they are not raw scatter plots or box plots.
-
-Raw bin-series cards are hidden when the metric filter is empty. Enter a filter
-such as `bin_` to inspect their counts and individual values. Relationship legends
-include each run's source step, so comparisons across runs do not imply identical
-training progress. The mean and quantile fields must share a common step with the
-bin count and x value; missing values are omitted rather than borrowed from a
-previous step. Run the JavaScript contract check with `node tests/js/binned.test.cjs`.

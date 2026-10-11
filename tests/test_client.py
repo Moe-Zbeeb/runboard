@@ -1,15 +1,14 @@
 import json
-import time
 from pathlib import Path
+import time
 from urllib.parse import quote
 
+from helpers import http_get, wait_for
 import runboard
 from runboard import config
 from runboard.client import Run, sync
 from runboard.server import Server
 from runboard.storage import Storage
-
-from helpers import http_get, wait_for
 
 
 def test_client_http_mode(server):
@@ -435,3 +434,20 @@ def test_sync_replays_spools_in_creation_order(tmp_path, server):
     sync(server=f"http://127.0.0.1:{server.port}", token="secret")
     rows, _ = server.storage.read_rows("p", run.run_id)
     assert [r["v"] for r in rows] == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_ls_lists_runs_from_the_configured_server(server, capsys):
+    from runboard.cli import main
+
+    config.write_server_info({"url": f"http://127.0.0.1:{server.port}", "token": "secret"})
+    server.storage.update_meta("p", "remote-run", {"status": "finished"})
+    main(["ls"])
+    assert "remote-run" in capsys.readouterr().out
+
+
+def test_ls_with_dir_reads_local_runs(tmp_path, capsys):
+    from runboard.cli import main
+
+    Storage(tmp_path / "runs").update_meta("p", "local-run", {"status": "running"})
+    main(["ls", "--dir", str(tmp_path / "runs")])
+    assert "local-run" in capsys.readouterr().out

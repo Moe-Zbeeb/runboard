@@ -1,5 +1,7 @@
 import argparse
 import getpass
+import json
+import os
 import signal
 import socket
 import sys
@@ -109,8 +111,30 @@ def cmd_serve(args):
         srv.stop()
 
 
+def _remote_runs(server, token):
+    request = urllib.request.Request(
+        f"{server.rstrip('/')}/api/runs",
+        headers={"Authorization": f"Bearer {token}", "User-Agent": "runboard/0.2"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"runboard: {server} returned HTTP {e.code}; run `runboard doctor`") from e
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"runboard: cannot list runs from {server} ({e}); run `runboard doctor`") from e
+
+
 def cmd_ls(args):
-    runs = Storage(args.dir).list_runs()
+    runs = None
+    if args.dir is None and (args.server or not os.environ.get("RUNBOARD_DIR")):
+        info = config.read_server_info()
+        server = args.server or os.environ.get("RUNBOARD_SERVER") or info.get("url")
+        token = args.token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
+        if server and token:
+            runs = _remote_runs(server, token)
+    if runs is None:
+        runs = Storage(args.dir or os.environ.get("RUNBOARD_DIR") or "./runboard-runs").list_runs()
     for r in runs:
         upd = datetime.fromtimestamp(r["updated"]).strftime("%Y-%m-%d %H:%M") if r.get("updated") else "-"
         print(f"{r['project']:20} {r['run_id']:28} {str(r.get('status', '')):10} {upd}  {r.get('name', '')}")
@@ -168,8 +192,10 @@ def main(argv=None):
     s.add_argument("--notify", help="POST the public URL to this webhook (e.g. https://ntfy.sh/<topic>)")
     s.set_defaults(func=cmd_serve)
 
-    s = sub.add_parser("ls", help="list runs")
-    s.add_argument("--dir", default="./runboard-runs")
+    s = sub.add_parser("ls", help="list runs on the configured server or in a local directory")
+    s.add_argument("--dir", default=None, help="list runs stored in this directory")
+    s.add_argument("--server", help="list runs on this server")
+    s.add_argument("--token", help="token for --server")
     s.set_defaults(func=cmd_ls)
 
     s = sub.add_parser("sync", help="upload spooled offline metrics")

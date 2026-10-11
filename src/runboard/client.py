@@ -87,6 +87,16 @@ _live_runs = []
 _previous_sigterm = None
 _sigterm_installed = False
 
+_spool_lock = threading.Lock()
+_spool_clock = 0
+
+
+def _spool_stamp():
+    global _spool_clock
+    with _spool_lock:
+        _spool_clock = max(time.time_ns(), _spool_clock + 1)
+        return _spool_clock
+
 
 def _on_sigterm(signum, frame):
     for run in list(_live_runs):
@@ -214,21 +224,31 @@ class Run:
     def log(self, data, step=None):
         if self._finished:
             return
+        row = clean_row(dict(data))
+        with self._lock:
+            self._append(row, step, time.time(), self._sid, self._seq)
+            self._seq += 1
+
+    def _log_row(self, metrics, step, when, sid, seq):
+        if self._finished:
+            return
+        row = clean_row(dict(metrics))
+        with self._lock:
+            self._append(row, step, time.time() if when is None else when, sid, seq)
+
+    def _append(self, row, step, when, sid, seq):
         if step is None:
             step = self._step
         self._step = max(self._step, int(step) + 1)
-        row = clean_row(dict(data))
         row["_step"] = int(step)
-        row["_time"] = time.time()
-        with self._lock:
-            row["_seq"] = self._seq
-            row["_sid"] = self._sid
-            self._seq += 1
-            self._rows.append(row)
-            if len(self._rows) > self.max_buffer:
-                overflow = self._rows[: len(self._rows) - self.max_buffer]
-                del self._rows[: len(overflow)]
-                self._overflow.extend(overflow)
+        row["_time"] = when
+        row["_seq"] = seq
+        row["_sid"] = sid
+        self._rows.append(row)
+        if len(self._rows) > self.max_buffer:
+            overflow = self._rows[: len(self._rows) - self.max_buffer]
+            del self._rows[: len(overflow)]
+            self._overflow.extend(overflow)
 
     def _take(self):
         with self._lock:
@@ -391,7 +411,7 @@ class Run:
         d = spool_dir()
         d.mkdir(parents=True, exist_ok=True)
         first_seq = rows[0].get("_seq", 0) if rows else self._seq
-        p = d / f"{self.project[:48]}__{self.run_id[:48]}__{self._sid}__{first_seq:020d}.jsonl"
+        p = d / f"{self.project[:48]}__{self.run_id[:48]}__{_spool_stamp():020d}__{self._sid}__{first_seq:020d}.jsonl"
         tmp = p.with_suffix(".jsonl.tmp")
         tmp.write_text(json.dumps({"project": self.project, "run_id": self.run_id, "meta": meta, "rows": rows}, default=str) + "\n")
         with open(tmp, "rb") as f:

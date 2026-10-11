@@ -413,3 +413,25 @@ def test_secret_files_are_created_private(monkeypatch):
         os.umask(old)
     for name in ("token", "server.json"):
         assert (config.home() / name).stat().st_mode & 0o777 == 0o600
+
+
+def test_log_row_keeps_explicit_session_and_time(tmp_path):
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=60)
+    run._log_row({"loss": 0.5}, 7, 123.0, "src-a", 4)
+    run._log_row({"loss": 0.25}, None, None, "src-a", 5)
+    run.log({"loss": 0.1})
+    run.finish()
+    rows, _ = Storage(tmp_path / "x").read_rows("p", run.run_id)
+    assert [(r["_sid"], r["_seq"], r["_step"]) for r in rows] == [("src-a", 4, 7), ("src-a", 5, 8), (run._sid, 0, 9)]
+    assert rows[0]["_time"] == 123.0 and rows[1]["_time"] > 123.0
+
+
+def test_sync_replays_spools_in_creation_order(tmp_path, server):
+    run = Run("p", dir=str(tmp_path / "x"), flush_interval=60)
+    first = run._spool({}, [{"v": 1.0, "_step": 0, "_seq": 50, "_sid": "b"}, {"v": 2.0, "_step": 1, "_seq": 0, "_sid": "a"}])
+    second = run._spool({}, [{"v": 3.0, "_step": 2, "_seq": 1, "_sid": "a"}, {"v": 4.0, "_step": 3, "_seq": 51, "_sid": "b"}])
+    run.finish()
+    assert sorted([first.name, second.name]) == [first.name, second.name]
+    sync(server=f"http://127.0.0.1:{server.port}", token="secret")
+    rows, _ = server.storage.read_rows("p", run.run_id)
+    assert [r["v"] for r in rows] == [1.0, 2.0, 3.0, 4.0]

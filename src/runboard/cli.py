@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from . import __version__, config
 from .client import sync
+from .runner import run_command
 from .server import Server
 from .storage import Storage
 
@@ -175,6 +176,18 @@ def main(argv=None):
     s = sub.add_parser("url", help="print the dashboard URL")
     s.set_defaults(func=cmd_url)
 
+    s = sub.add_parser("run", help="run a training command and stream the metrics it logs")
+    s.add_argument("--project", help="dashboard project (default: current directory name)")
+    s.add_argument("--name", help="display name (default: script name and timestamp)")
+    s.add_argument("--run-id", help="run id; reuse one to continue a run")
+    s.add_argument("--watch", action="append", default=[], metavar="DIR", help="also search this directory for metric files")
+    s.add_argument("--source", action="append", default=[], metavar="FILE", help="follow only these files")
+    s.add_argument("--stdout", choices=["auto", "on", "off"], default="auto", help="parse metrics from command output")
+    s.add_argument("--config-json", metavar="FILE", help="record hyperparameters from a JSON file")
+    s.add_argument("--config", action="append", default=[], metavar="KEY=VALUE", help="record a hyperparameter")
+    s.add_argument("command", nargs=argparse.REMAINDER, help="the command to run, after --")
+    s.set_defaults(func=run_command)
+
     s = sub.add_parser("configure", help="save and verify a hosted Runboard server")
     s.add_argument("server", help="Runboard URL, such as https://runboard.<account>.workers.dev")
     s.add_argument("--token", help="access token; omitted values are read securely from the terminal")
@@ -185,7 +198,9 @@ def main(argv=None):
     if getattr(args, "cmd", None) == "serve":
         args.port_explicit = args.port is not None
         args.port = args.port or 8080
-    args.func(args)
+    code = args.func(args)
+    if code:
+        raise SystemExit(code)
 
 
 if __name__ == "__main__":

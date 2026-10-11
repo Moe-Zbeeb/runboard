@@ -2,11 +2,15 @@ import hashlib
 import json
 import os
 import secrets
+import signal
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 from . import config as _config
+from .client import Run
 from .follow import discover
 from .follow.csvfile import CsvFollower
 from .follow.hf_state import CHECKPOINT, HfStateFollower
@@ -221,3 +225,176 @@ class Streamer:
             return True
         finally:
             lock.release()
+
+
+def _primary():
+    return all(os.environ.get(name) in (None, "", "0") for name in ("RANK", "LOCAL_RANK", "SLURM_PROCID"))
+
+
+def build_config(command, config_json=None, pairs=()):
+    config = {"command": list(command), "cwd": os.getcwd()}
+    if config_json:
+        try:
+            loaded = json.loads(Path(config_json).read_text())
+        except (OSError, ValueError) as e:
+            _say(f"ignoring --config-json {config_json} ({e})")
+            loaded = None
+        if isinstance(loaded, dict):
+            config.update(loaded)
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            _say(f"ignoring --config {pair!r}; expected KEY=VALUE")
+            continue
+        try:
+            config[key] = json.loads(value)
+        except ValueError:
+            config[key] = value
+    return config
+
+
+def default_name(command):
+    script = Path(command[0]).name
+    for index, part in enumerate(command[1:], 1):
+        if part == "-m" and index + 1 < len(command):
+            script = command[index + 1].rsplit(".", 1)[-1]
+            break
+        if part.endswith(".py"):
+            script = Path(part).stem
+            break
+    return f"{script}-{time.strftime('%Y%m%d-%H%M%S')}"
+
+
+def _pipe(source, sink, streamer, name):
+    fd = source.fileno()
+    while True:
+        try:
+            chunk = os.read(fd, 65536)
+        except OSError:
+            break
+        if not chunk:
+            break
+        try:
+            sink.write(chunk)
+            sink.flush()
+        except (OSError, ValueError, TypeError):
+            pass
+        if streamer is not None:
+            streamer.feed(name, chunk)
+    try:
+        source.close()
+    except OSError:
+        pass
+
+
+def _status(code, received):
+    if code == 0:
+        return "finished"
+    if code < 0 or code in (128 + signal.SIGINT, 128 + signal.SIGTERM) or signal.SIGTERM in received:
+        return "killed"
+    return "crashed"
+
+
+def _summary(run, streamer, status):
+    if streamer.rows:
+        _say(f"{status}: logged {streamer.rows} rows to {run.project}/{run.run_id}")
+    else:
+        _say(
+            f"{status}: no metrics found for {run.project}/{run.run_id}; write TensorBoard, JSONL, or CSV logs, "
+            "or print lines like 'step=1 loss=0.5' (see `runboard guide`)"
+        )
+
+
+def run_command(args):
+    command = list(args.command)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        _say("nothing to run; usage: runboard run [options] -- <command ...>")
+        return 2
+    started = time.time()
+    run = streamer = None
+    if _primary():
+        try:
+            config = build_config(command, args.config_json, args.config)
+            run = Run(project=args.project or Path.cwd().name, name=args.name or default_name(command), run_id=args.run_id, config=config)
+            sources = [(discover.classify(path) or "stdout", Path(path)) for path in args.source]
+            streamer = Streamer(
+                run,
+                roots=[Path.cwd()] + [Path(path) for path in args.watch],
+                sources=sources,
+                since=started - 2,
+                stdout=args.stdout,
+                state_file=state_path(run.project, run.run_id),
+                config=config,
+            )
+            _say(f"logging {run.project}/{run.run_id} ({run.mode} mode)")
+        except Exception as e:
+            _say(f"setup failed ({e}); running the command without Runboard")
+            if run is not None:
+                run.finish("crashed")
+            run = streamer = None
+    pipe = streamer is not None and args.stdout != "off"
+    env = dict(os.environ)
+    if pipe:
+        env.setdefault("PYTHONUNBUFFERED", "1")
+    received = []
+    children = []
+
+    def on_term(signum, frame):
+        received.append(signum)
+        for child in children:
+            try:
+                child.send_signal(signum)
+            except OSError:
+                pass
+
+    previous_term = signal.signal(signal.SIGTERM, on_term)
+    previous_int = signal.signal(signal.SIGINT, lambda signum, frame: received.append(signum))
+    try:
+        child = subprocess.Popen(command, env=env, stdout=subprocess.PIPE if pipe else None, stderr=subprocess.PIPE if pipe else None)
+    except OSError as e:
+        signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
+        _say(f"cannot start {command[0]}: {e}")
+        if run is not None:
+            run.finish("crashed")
+        return 127
+    children.append(child)
+    if signal.SIGTERM in received:
+        child.send_signal(signal.SIGTERM)
+    readers = []
+    if pipe:
+        outputs = ((child.stdout, getattr(sys.stdout, "buffer", sys.stdout), "stdout"), (child.stderr, getattr(sys.stderr, "buffer", sys.stderr), "stderr"))
+        for source, sink, name in outputs:
+            reader = threading.Thread(target=_pipe, args=(source, sink, streamer, name), daemon=True)
+            reader.start()
+            readers.append(reader)
+    reported = False
+    while True:
+        try:
+            code = child.wait(timeout=1.0)
+            break
+        except subprocess.TimeoutExpired:
+            pass
+        if streamer is not None:
+            try:
+                streamer.step()
+            except Exception as e:
+                if not reported:
+                    _say(f"metric collection error ({e}); the command keeps running")
+                    reported = True
+    for reader in readers:
+        reader.join(timeout=5)
+    signal.signal(signal.SIGTERM, previous_term)
+    signal.signal(signal.SIGINT, previous_int)
+    if run is not None:
+        status = _status(code, received)
+        try:
+            streamer.drain()
+        except Exception as e:
+            _say(f"metric collection error ({e})")
+        run.finish(status)
+        streamer.save()
+        _summary(run, streamer, status)
+    return 128 - code if code < 0 else code

@@ -40,6 +40,7 @@ jobs:
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install dist/*.whl
           /tmp/smoke/bin/runboard --version
+          /tmp/smoke/bin/runboard guide | grep -q "runboard doctor"
           /tmp/smoke/bin/python -c "import runboard, pathlib; assert (pathlib.Path(runboard.__file__).parent / 'static' / 'index.html').exists()"
       - uses: actions/upload-artifact@v4
         with:

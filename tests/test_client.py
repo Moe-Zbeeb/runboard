@@ -451,3 +451,16 @@ def test_ls_with_dir_reads_local_runs(tmp_path, capsys):
     Storage(tmp_path / "runs").update_meta("p", "local-run", {"status": "running"})
     main(["ls", "--dir", str(tmp_path / "runs")])
     assert "local-run" in capsys.readouterr().out
+
+
+def test_guide_prints_the_packaged_agent_guide(capsys):
+    from runboard.cli import main
+
+    main(["guide"])
+    out = capsys.readouterr().out
+    assert out.startswith("# Integrating Runboard") and "runboard doctor" in out and "runboard run --" in out
+
+
+def test_agent_guide_matches_docs_copy():
+    root = Path(__file__).parents[1]
+    assert (root / "src" / "runboard" / "AGENT_GUIDE.md").read_bytes() == (root / "docs" / "integrating.md").read_bytes()

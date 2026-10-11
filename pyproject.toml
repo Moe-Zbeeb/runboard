@@ -40,7 +40,7 @@ runboard = "runboard.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-runboard = ["static/*"]
+runboard = ["static/*", "AGENT_GUIDE.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from . import __version__, config
@@ -179,6 +180,10 @@ def cmd_doctor(args):
     return doctor(args.server, args.token)
 
 
+def cmd_guide(args):
+    sys.stdout.write((Path(__file__).parent / "AGENT_GUIDE.md").read_text())
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="runboard", description="Live training dashboards for any cluster.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -234,6 +239,9 @@ def main(argv=None):
     s.add_argument("--server", help="check this server instead of the configured one")
     s.add_argument("--token", help="token for --server")
     s.set_defaults(func=cmd_doctor)
+
+    s = sub.add_parser("guide", help="print the integration guide for coding agents")
+    s.set_defaults(func=cmd_guide)
 
     s = sub.add_parser("configure", help="save and verify a hosted Runboard server")
     s.add_argument("server", help="Runboard URL, such as https://runboard.<account>.workers.dev")

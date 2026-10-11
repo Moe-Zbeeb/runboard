@@ -1,11 +1,15 @@
+import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
+import time
 
 import pytest
 
 from helpers import wait_for
+from runboard.client import Run, sync
 from runboard.runner import _pipe, build_config, default_name
 
 
@@ -163,3 +167,97 @@ def test_watch_rejects_missing_paths(tmp_path):
     with pytest.raises(SystemExit) as e:
         main(["watch"])
     assert e.value.code == 2
+
+
+STUBBORN = """
+import signal, time
+count = []
+signal.signal(signal.SIGTERM, lambda *a: count.append(1))
+open("ready", "w").close()
+end = time.time() + 3
+while time.time() < end:
+    time.sleep(0.05)
+open("terms", "w").write(str(len(count)))
+"""
+
+LOUD = """
+import sys
+for i in range(20000):
+    print("line", i)
+sys.exit(3)
+"""
+
+
+def test_watch_after_an_outage_keeps_spooled_rows(tmp_path, server, monkeypatch):
+    from runboard.cli import main
+
+    finish = Run.finish
+    monkeypatch.setattr(Run, "finish", lambda self, status="finished", timeout=10.0: finish(self, status, 0.2))
+    logs = tmp_path / "out"
+    logs.mkdir()
+    (logs / "metrics.jsonl").write_text("".join(json.dumps({"step": s, "loss": float(s)}) + "\n" for s in range(5)))
+    monkeypatch.setenv("RUNBOARD_TOKEN", "secret")
+    monkeypatch.setenv("RUNBOARD_SERVER", "http://127.0.0.1:9")
+    main(["watch", str(logs), "--once", "--project", "p"])
+    with open(logs / "metrics.jsonl", "a") as f:
+        f.write("".join(json.dumps({"step": s, "loss": float(s)}) + "\n" for s in range(5, 8)))
+    monkeypatch.setenv("RUNBOARD_SERVER", f"http://127.0.0.1:{server.port}")
+    main(["watch", str(logs), "--once", "--project", "p"])
+    sync(server=f"http://127.0.0.1:{server.port}", token="secret")
+    run_id = server.storage.list_runs()[0]["run_id"]
+    assert sorted(r["_step"] for r in server.storage.read_rows("p", run_id)[0]) == list(range(8))
+
+
+def test_watch_interrupt_keeps_rows_read_so_far(tmp_path, server, monkeypatch):
+    from runboard.cli import main
+    from runboard.follow.jsonl import JsonlFollower
+
+    monkeypatch.setenv("RUNBOARD_SERVER", f"http://127.0.0.1:{server.port}")
+    monkeypatch.setenv("RUNBOARD_TOKEN", "secret")
+    logs = tmp_path / "out"
+    logs.mkdir()
+    (logs / "metrics.jsonl").write_text("".join(json.dumps({"step": s, "loss": float(s)}) + "\n" for s in range(3)))
+    original = JsonlFollower.poll
+
+    def poll(self):
+        records = original(self)
+        if records:
+            os.kill(os.getpid(), signal.SIGINT)
+        return records
+
+    monkeypatch.setattr(JsonlFollower, "poll", poll)
+    main(["watch", str(logs), "--project", "p", "--run-id", "w"])
+    assert [r["_step"] for r in server.storage.read_rows("p", "w")[0]] == [0, 1, 2]
+    assert server.storage.read_meta("p", "w")["status"] == "killed"
+
+
+def test_run_forwards_sigterm_once(tmp_path, server):
+    (tmp_path / "stubborn.py").write_text(STUBBORN)
+    proc = subprocess.Popen(_wrap_args("--", sys.executable, "stubborn.py"), cwd=tmp_path, env=_env(server), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    assert wait_for(lambda: (tmp_path / "ready").exists(), timeout=30)
+    proc.send_signal(signal.SIGTERM)
+    time.sleep(0.3)
+    proc.send_signal(signal.SIGTERM)
+    proc.communicate(timeout=60)
+    assert (tmp_path / "terms").read_text() == "1"
+
+
+def test_run_keeps_exit_code_when_output_is_cut_short(tmp_path, server):
+    (tmp_path / "loud.py").write_text(LOUD)
+    command = " ".join(shlex.quote(part) for part in _wrap_args("--", sys.executable, "loud.py")) + " | head -1; exit ${PIPESTATUS[0]}"
+    result = subprocess.run(["bash", "-c", command], cwd=tmp_path, env=_env(server), capture_output=True, text=True, timeout=60)
+    assert result.returncode == 3
+    assert "Exception ignored" not in result.stderr
+
+
+def test_run_warns_about_missing_watch_and_source_paths(tmp_path, server):
+    result = _wrap(tmp_path, server, "--watch", "nope", "--source", str(tmp_path), "--", sys.executable, "child.py", "0")
+    assert "--watch nope does not exist" in result.stderr
+    assert "is a directory" in result.stderr
+
+
+def test_run_with_source_ignores_other_files(tmp_path, server):
+    (tmp_path / "train.log").write_text("step=1 loss=0.5\n")
+    result = _wrap(tmp_path, server, "--source", "train.log", "--", sys.executable, "child.py", "0")
+    assert result.returncode == 0
+    assert [r["loss"] for r in server.storage.read_rows("p", "job")[0]] == [0.5]

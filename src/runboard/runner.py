@@ -94,6 +94,13 @@ class Streamer:
         self.stream_sid = secrets.token_hex(8)
         self.stream_count = 0
         self.parsing_output = False
+        self.explicit = {str(path) for _, path in self.sources}
+        storage = getattr(getattr(run, "_sink", None), "storage", None)
+        self.exclude = [_config.home()] + ([storage.root] if storage is not None else [])
+        if os.environ.get("RUNBOARD_DIR"):
+            self.exclude.append(Path(os.environ["RUNBOARD_DIR"]).expanduser())
+        if self.state_file and not saved.get("nonce"):
+            self.save()
 
     def feed(self, name, data):
         self.streams[name].feed(data)
@@ -125,23 +132,25 @@ class Streamer:
         names = [_relative(key) for key in sorted(self.followers)]
         shown = ", ".join(names[:3]) + (f", and {len(names) - 3} more" if len(names) > 3 else "")
         noun = "source" if len(names) == 1 else "sources"
-        _say(f"following {len(names)} {LABELS[self.kind]} {noun}: {shown}")
+        label = f"{LABELS[self.kind]} " if self.kind in LABELS else ""
+        _say(f"following {len(names)} {label}{noun}: {shown}")
 
     def scan(self):
         self.last_scan = self.clock()
         if self.sources:
-            if self.kind is None:
+            if self.kind is None and not self.roots:
                 self._set_kind("explicit")
             if any([self._add(kind, path) for kind, path in self.sources]):
                 self._announce()
+        if not self.roots:
             return
-        kind, paths = discover.best(discover.scan(self.roots, since=self.since))
+        kind, paths = discover.best(discover.scan(self.roots, since=self.since, exclude=self.exclude))
         if kind is None:
             return
         if self.kind in discover.PRIORITY and discover.PRIORITY.index(kind) > discover.PRIORITY.index(self.kind):
             return
         if kind != self.kind:
-            for key in [key for key, entry in self.followers.items() if entry["kind"] != kind]:
+            for key in [key for key, entry in self.followers.items() if entry["kind"] != kind and key not in self.explicit]:
                 del self.followers[key]
             self._set_kind(kind)
         if kind == "hf":
@@ -152,7 +161,7 @@ class Streamer:
     def _stdout_active(self, final):
         if self.stdout == "on":
             return True
-        if self.stdout != "auto" or self.kind is not None:
+        if self.stdout != "auto" or self.kind is not None or self.sources:
             return False
         return final or self.clock() - self.started >= STDOUT_GRACE
 
@@ -164,7 +173,12 @@ class Streamer:
         logged = 0
         for key in sorted(self.followers):
             entry = self.followers[key]
-            for record in entry["follower"].poll():
+            follower = entry["follower"]
+            records = follower.poll()
+            if getattr(follower, "rewound", False):
+                follower.rewound = False
+                entry["count"] = 0
+            for record in records:
                 self._log(record, entry["sid"], entry["count"])
                 entry["count"] += 1
                 logged += 1
@@ -178,17 +192,16 @@ class Streamer:
                     self._log(record, self.stream_sid, self.stream_count)
                     self.stream_count += 1
                     logged += 1
-        elif self.stdout == "off" or self.kind is not None:
+        elif self.stdout == "off" or self.kind is not None or self.sources:
             for stream in self.streams.values():
                 stream.discard()
         return logged
 
     def step(self):
+        self.checkpoint()
         if self.last_scan is None or self.clock() - self.last_scan >= SCAN_INTERVAL:
             self.scan()
-        logged = self.pump()
-        self.checkpoint()
-        return logged
+        return self.pump()
 
     def drain(self):
         self.scan()
@@ -267,8 +280,20 @@ def default_name(command):
     return f"{script}-{time.strftime('%Y%m%d-%H%M%S')}"
 
 
+def _silence(sink):
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null, sink.fileno())
+        finally:
+            os.close(null)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
 def _pipe(source, sink, streamer, name):
     fd = source.fileno()
+    writable = True
     while True:
         try:
             chunk = os.read(fd, 65536)
@@ -276,11 +301,13 @@ def _pipe(source, sink, streamer, name):
             break
         if not chunk:
             break
-        try:
-            sink.write(chunk)
-            sink.flush()
-        except (OSError, ValueError, TypeError):
-            pass
+        if writable:
+            try:
+                sink.write(chunk)
+                sink.flush()
+            except (OSError, ValueError, TypeError):
+                writable = False
+                _silence(sink)
         if streamer is not None:
             streamer.feed(name, chunk)
     try:
@@ -320,10 +347,18 @@ def run_command(args):
         try:
             config = build_config(command, args.config_json, args.config)
             run = Run(project=args.project or Path.cwd().name, name=args.name or default_name(command), run_id=args.run_id, config=config)
+            for path in args.watch:
+                if not Path(path).is_dir():
+                    _say(f"--watch {path} does not exist" if not Path(path).exists() else f"--watch {path} is not a directory")
+            for path in args.source:
+                if Path(path).is_dir():
+                    _say(f"--source {path} is a directory; use --watch for directories")
+                elif not Path(path).exists():
+                    _say(f"--source {path} does not exist yet; it is followed once it appears")
             sources = [(discover.classify(path) or "stdout", Path(path)) for path in args.source]
             streamer = Streamer(
                 run,
-                roots=[Path.cwd()] + [Path(path) for path in args.watch],
+                roots=[] if args.source else [Path.cwd()] + [Path(path) for path in args.watch],
                 sources=sources,
                 since=started - 2,
                 stdout=args.stdout,
@@ -344,7 +379,10 @@ def run_command(args):
     children = []
 
     def on_term(signum, frame):
+        first = signal.SIGTERM not in received
         received.append(signum)
+        if not first:
+            return
         for child in children:
             try:
                 child.send_signal(signum)
@@ -397,7 +435,8 @@ def run_command(args):
         except Exception as e:
             _say(f"metric collection error ({e})")
         run.finish(status)
-        streamer.save()
+        if run._delivered:
+            streamer.save()
         _summary(run, streamer, status)
     return 128 - code if code < 0 else code
 
@@ -433,8 +472,8 @@ def watch_command(args):
     streamer.created = streamer.created or time.time()
     run._set_meta(created=streamer.created)
     stop = threading.Event()
-    previous = signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
-    status = "finished"
+    previous_term = signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
+    previous_int = signal.signal(signal.SIGINT, lambda signum, frame: stop.set())
     try:
         if args.once:
             streamer.drain()
@@ -443,16 +482,18 @@ def watch_command(args):
             while not stop.is_set():
                 streamer.step()
                 stop.wait(1.0)
-            status = "killed"
     except KeyboardInterrupt:
-        status = "killed"
+        stop.set()
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
+    status = "killed" if stop.is_set() else "finished"
     try:
         streamer.drain()
     except Exception as e:
         _say(f"metric collection error ({e})")
     run.finish(status)
-    streamer.save()
+    if run._delivered:
+        streamer.save()
     _say(f"{status}: logged {streamer.rows} rows to {run.project}/{run.run_id}")
     return 0

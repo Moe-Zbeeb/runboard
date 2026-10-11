@@ -163,6 +163,7 @@ class Run:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._finished = False
+        self._delivered = False
         self._warned = False
         if _is_nonzero_rank() and not all_ranks:
             self._sink, self.mode = _NullSink(), "disabled"
@@ -198,6 +199,7 @@ class Run:
         server = server or os.environ.get("RUNBOARD_SERVER") or info.get("url")
         token = token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
         if server and token:
+            server = _config.normalize_url(server)
             try:
                 urllib.request.urlopen(
                     urllib.request.Request(
@@ -211,6 +213,8 @@ class Run:
                     _warn(f"server {server} rejected the token; metrics will be buffered (check RUNBOARD_TOKEN)")
             except OSError as e:
                 _warn(f"server {server} not reachable yet ({e}); metrics will be buffered and retried")
+            except ValueError as e:
+                _warn(f"server URL {server!r} is invalid ({e}); metrics will be buffered (check RUNBOARD_SERVER)")
             return _HttpSink(server, token), "http"
         if mode == "http":
             raise ValueError("http mode needs a server and token (args, RUNBOARD_SERVER/RUNBOARD_TOKEN, or `runboard serve`)")
@@ -437,6 +441,7 @@ class Run:
         while True:
             ok = self._flush_once(deadline)
             if ok and self._is_empty():
+                self._delivered = True
                 return
             if time.time() >= deadline:
                 break
@@ -469,7 +474,7 @@ def sync(server=None, token=None, paths=None):
     token = token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
     if not (server and token):
         raise ValueError("no server/token configured")
-    sink = _HttpSink(server, token)
+    sink = _HttpSink(_config.normalize_url(server), token)
     files = [Path(p) for p in paths] if paths else sorted(spool_dir().glob("*.jsonl"))
     total = 0
     for p in files:
@@ -477,10 +482,20 @@ def sync(server=None, token=None, paths=None):
             text = p.read_text()
         except FileNotFoundError:
             continue
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            rec = json.loads(line)
+        try:
+            records = [json.loads(line) for line in text.splitlines() if line.strip()]
+            for rec in records:
+                if not isinstance(rec, dict) or not isinstance(rec.get("rows"), list) or not (rec.get("project") and rec.get("run_id")):
+                    raise ValueError("not a spool record")
+        except ValueError as e:
+            bad = p.with_suffix(".jsonl.corrupt")
+            _warn(f"spool file {p} is unreadable ({e}); moved to {bad}")
+            try:
+                os.replace(p, bad)
+            except OSError:
+                pass
+            continue
+        for rec in records:
             rows = rec["rows"]
             meta = rec.get("meta") or None
             for i in range(0, max(len(rows), 1), 5000):

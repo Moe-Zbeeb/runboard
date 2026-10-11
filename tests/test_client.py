@@ -3,6 +3,8 @@ from pathlib import Path
 import time
 from urllib.parse import quote
 
+import pytest
+
 from helpers import http_get, wait_for
 import runboard
 from runboard import config
@@ -464,3 +466,63 @@ def test_guide_prints_the_packaged_agent_guide(capsys):
 def test_agent_guide_matches_docs_copy():
     root = Path(__file__).parents[1]
     assert (root / "src" / "runboard" / "AGENT_GUIDE.md").read_bytes() == (root / "docs" / "integrating.md").read_bytes()
+
+
+def test_server_url_without_scheme_does_not_break_init(monkeypatch):
+    monkeypatch.setenv("RUNBOARD_SERVER", "runboard.invalid")
+    monkeypatch.setenv("RUNBOARD_TOKEN", "secret")
+    run = Run("p", flush_interval=60)
+    assert run.mode == "http" and run._sink.server == "https://runboard.invalid"
+    run.finish(timeout=0)
+
+
+def test_configure_adds_https_to_a_bare_host():
+    from runboard.cli import main
+
+    with pytest.raises(SystemExit) as e:
+        main(["configure", "127.0.0.1:9", "--token", "secret"])
+    assert "https://127.0.0.1:9" in str(e.value.code)
+
+
+def test_config_keys_that_are_not_strings_do_not_break_delivery(tmp_path):
+    run = Run("p", dir=str(tmp_path / "x"), config={("layer", 1): 0.5}, flush_interval=60)
+    run.log({"loss": 1.0})
+    run.finish()
+    assert Storage(tmp_path / "x").read_meta("p", run.run_id)["config"] == {"('layer', 1)": 0.5}
+
+
+def test_finish_reports_whether_everything_was_delivered(tmp_path):
+    delivered = Run("p", dir=str(tmp_path / "x"), flush_interval=60)
+    delivered.log({"v": 1})
+    delivered.finish()
+    assert delivered._delivered
+    offline = Run("p", server="http://127.0.0.1:9", token="secret", flush_interval=60)
+    offline.log({"v": 1})
+    offline.finish(timeout=0)
+    assert not offline._delivered
+
+
+def _spool_record(value):
+    return json.dumps({"project": "p", "run_id": "r", "meta": {}, "rows": [{"v": value, "_step": 0, "_seq": 0, "_sid": "s"}]}) + "\n"
+
+
+def test_sync_skips_corrupt_spool_files(server):
+    spool = config.home() / "spool"
+    spool.mkdir(parents=True)
+    (spool / "p__r__1__s__0.jsonl").write_text('{"project": "p", "run_id": "r", "rows": [')
+    (spool / "p__r__2__s__0.jsonl").write_text(_spool_record(1.0))
+    assert sync(server=f"http://127.0.0.1:{server.port}", token="secret") == 1
+    assert (spool / "p__r__1__s__0.jsonl.corrupt").exists()
+    assert [r["v"] for r in server.storage.read_rows("p", "r")[0]] == [1.0]
+
+
+def test_sync_command_reports_an_unreachable_server():
+    from runboard.cli import main
+
+    spool = config.home() / "spool"
+    spool.mkdir(parents=True)
+    (spool / "p__r__1__s__0.jsonl").write_text(_spool_record(1.0))
+    with pytest.raises(SystemExit) as e:
+        main(["sync", "--server", "http://127.0.0.1:9", "--token", "secret"])
+    assert "could not upload" in str(e.value.code)
+    assert (spool / "p__r__1__s__0.jsonl").exists()

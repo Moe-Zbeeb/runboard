@@ -1,5 +1,6 @@
 import argparse
 import getpass
+import http.client
 import json
 import os
 import signal
@@ -142,7 +143,12 @@ def cmd_ls(args):
 
 
 def cmd_sync(args):
-    n = sync(server=args.server, token=args.token, paths=args.files or None)
+    try:
+        n = sync(server=args.server, token=args.token, paths=args.files or None)
+    except ValueError as e:
+        raise SystemExit(f"runboard: {e}; run `runboard configure <url>` or pass --server and --token") from e
+    except (OSError, http.client.HTTPException) as e:
+        raise SystemExit(f"runboard: could not upload spooled metrics ({e}); the spool files are kept, so run `runboard sync` again later") from e
     print(f"uploaded {n} rows")
 
 
@@ -153,7 +159,7 @@ def cmd_url(args):
 
 
 def cmd_configure(args):
-    server = args.server.rstrip("/")
+    server = config.normalize_url(args.server)
     token = args.token or getpass.getpass("Runboard access token: ").strip()
     if not token:
         raise SystemExit("runboard: access token cannot be empty")

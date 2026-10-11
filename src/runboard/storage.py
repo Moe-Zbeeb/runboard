@@ -51,7 +51,7 @@ def clean_meta(value):
     if isinstance(value, float):
         return value if math.isfinite(value) else repr(value)
     if isinstance(value, dict):
-        return {k: clean_meta(v) for k, v in value.items()}
+        return {k if isinstance(k, str) else str(k): clean_meta(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [clean_meta(v) for v in value]
     return value

@@ -8,6 +8,13 @@ def home():
     return Path(os.environ.get("RUNBOARD_HOME", "~/.runboard")).expanduser()
 
 
+def normalize_url(url):
+    url = str(url).strip()
+    if "://" not in url:
+        url = "https://" + url
+    return url.rstrip("/")
+
+
 def write_private(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

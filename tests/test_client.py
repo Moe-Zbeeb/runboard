@@ -526,3 +526,12 @@ def test_sync_command_reports_an_unreachable_server():
         main(["sync", "--server", "http://127.0.0.1:9", "--token", "secret"])
     assert "could not upload" in str(e.value.code)
     assert (spool / "p__r__1__s__0.jsonl").exists()
+
+
+def test_ls_does_not_send_the_saved_token_to_another_server(server):
+    from runboard.cli import main
+
+    config.write_server_info({"url": "https://runboard.example.workers.dev", "token": "secret"})
+    with pytest.raises(SystemExit) as e:
+        main(["ls", "--server", f"http://127.0.0.1:{server.port}"])
+    assert "no token" in str(e.value.code)

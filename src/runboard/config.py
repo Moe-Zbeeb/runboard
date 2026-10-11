@@ -38,6 +38,17 @@ def write_server_info(info):
     write_private(home() / "server.json", json.dumps(info, indent=2))
 
 
+def paired_token(server):
+    target = normalize_url(server)
+    env_server, env_token = os.environ.get("RUNBOARD_SERVER"), os.environ.get("RUNBOARD_TOKEN")
+    if env_server and env_token and normalize_url(env_server) == target:
+        return env_token, "RUNBOARD_TOKEN"
+    info = read_server_info()
+    if info.get("url") and info.get("token") and normalize_url(info["url"]) == target:
+        return info["token"], str(home() / "server.json")
+    return None, None
+
+
 def read_server_info():
     p = home() / "server.json"
     try:

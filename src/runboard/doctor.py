@@ -1,3 +1,4 @@
+import http.client
 import json
 import os
 import secrets
@@ -33,15 +34,18 @@ def _pick(options):
 
 
 def resolve(server=None, token=None):
+    if server:
+        secret, secret_from = (token, "argument") if token else _config.paired_token(server)
+        return {"mode": "http", "server": _config.normalize_url(server), "server_from": "argument", "token": secret, "token_from": secret_from}
     info = _config.read_server_info()
     saved = str(_config.home() / "server.json")
-    url, url_from = _pick([(server, "argument"), (os.environ.get("RUNBOARD_SERVER"), "RUNBOARD_SERVER"), (info.get("url"), saved)])
+    url, url_from = _pick([(os.environ.get("RUNBOARD_SERVER"), "RUNBOARD_SERVER"), (info.get("url"), saved)])
     secret, secret_from = _pick([(token, "argument"), (os.environ.get("RUNBOARD_TOKEN"), "RUNBOARD_TOKEN"), (info.get("token"), saved)])
     directory = os.environ.get("RUNBOARD_DIR")
-    if directory and not server:
+    if directory:
         return {"mode": "file", "dir": directory, "dir_from": "RUNBOARD_DIR", "partial": False}
     if url and secret:
-        return {"mode": "http", "server": url.rstrip("/"), "server_from": url_from, "token": secret, "token_from": secret_from}
+        return {"mode": "http", "server": _config.normalize_url(url), "server_from": url_from, "token": secret, "token_from": secret_from}
     return {"mode": "file", "dir": "./runboard-runs", "dir_from": "default", "partial": bool(url or secret)}
 
 
@@ -86,6 +90,8 @@ def _request(server, token, path, payload=None):
         raise _network_failure(server, e) from None
     except ValueError as e:
         raise Failure(f"{server} is not a valid Runboard URL or did not return JSON ({e})", "use the full https:// URL of the Worker or `runboard serve`") from None
+    except http.client.HTTPException as e:
+        raise Failure(f"{server} did not answer like an HTTP server ({e!r})", "check the URL and port; it should be the Worker or `runboard serve` address") from None
     except OSError as e:
         raise _network_failure(server, e) from None
 
@@ -145,6 +151,8 @@ def doctor(server=None, token=None, out=None):
     try:
         if target["mode"] == "http":
             line("destination", f"{target['server']} (from {target['server_from']})")
+            if not target["token"]:
+                raise Failure(f"no token for {target['server']}", f"pass --token, or run `runboard configure {target['server']}` first")
             line("token", f"set (from {target['token_from']})")
             checks = _check_http(target["server"], target["token"])
         else:

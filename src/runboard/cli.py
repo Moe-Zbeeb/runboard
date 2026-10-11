@@ -123,7 +123,7 @@ def _remote_runs(server, token):
             return json.loads(response.read())
     except urllib.error.HTTPError as e:
         raise SystemExit(f"runboard: {server} returned HTTP {e.code}; run `runboard doctor`") from e
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         raise SystemExit(f"runboard: cannot list runs from {server} ({e}); run `runboard doctor`") from e
 
 
@@ -131,10 +131,15 @@ def cmd_ls(args):
     runs = None
     if args.dir is None and (args.server or not os.environ.get("RUNBOARD_DIR")):
         info = config.read_server_info()
-        server = args.server or os.environ.get("RUNBOARD_SERVER") or info.get("url")
-        token = args.token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
+        if args.server:
+            server, token = args.server, args.token or config.paired_token(args.server)[0]
+            if not token:
+                raise SystemExit(f"runboard: no token for {args.server}; pass --token")
+        else:
+            server = os.environ.get("RUNBOARD_SERVER") or info.get("url")
+            token = args.token or os.environ.get("RUNBOARD_TOKEN") or info.get("token")
         if server and token:
-            runs = _remote_runs(server, token)
+            runs = _remote_runs(config.normalize_url(server), token)
     if runs is None:
         runs = Storage(args.dir or os.environ.get("RUNBOARD_DIR") or "./runboard-runs").list_runs()
     for r in runs:

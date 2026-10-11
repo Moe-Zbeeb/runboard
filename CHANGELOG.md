@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-12
+
 ### Added
 
 - `runboard run -- <command>` streams a training job's existing TensorBoard, JSONL, CSV, Hugging Face
@@ -104,3 +106,4 @@ First release.
 
 [0.1.0]: https://github.com/Moe-Zbeeb/runboard/releases/tag/v0.1.0
 [0.2.0]: https://github.com/Moe-Zbeeb/runboard/releases/tag/v0.2.0
+[0.3.0]: https://github.com/Moe-Zbeeb/runboard/releases/tag/v0.3.0

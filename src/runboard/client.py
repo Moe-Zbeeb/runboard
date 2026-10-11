@@ -30,7 +30,7 @@ def post_json(server, token, project, run_id, payload, timeout=10):
     req = urllib.request.Request(
         url,
         data=json.dumps(payload, default=str).encode(),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}", "User-Agent": "runboard/0.2"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}", "User-Agent": "runboard/0.3"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -204,7 +204,7 @@ class Run:
                 urllib.request.urlopen(
                     urllib.request.Request(
                         f"{server.rstrip('/')}/api/health",
-                        headers={"Authorization": f"Bearer {token}", "User-Agent": "runboard/0.2"},
+                        headers={"Authorization": f"Bearer {token}", "User-Agent": "runboard/0.3"},
                     ),
                     timeout=3,
                 ).close()

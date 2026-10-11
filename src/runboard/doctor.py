@@ -13,7 +13,7 @@ from pathlib import Path
 from . import config as _config
 from .storage import Storage
 
-USER_AGENT = "runboard/0.2"
+USER_AGENT = "runboard/0.3"
 PROJECT = "runboard"
 RUN_ID = "doctor"
 OFFLINE_FIX = "this machine may not allow outbound HTTPS; set RUNBOARD_DIR to a shared directory and run `runboard serve` (see `runboard guide`)"

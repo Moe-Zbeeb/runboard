@@ -19,6 +19,14 @@ python examples/quickstart.py --lr 1e-3        # terminal 2
 python examples/quickstart.py --lr 3e-4        # terminal 3
 ```
 
+To try the zero-code wrapper against the same server, run any script that writes a `metrics.jsonl` or
+prints `step=1 loss=0.5` lines:
+
+```bash
+runboard run --project demo -- python my_script.py
+runboard doctor
+```
+
 The dashboard is served straight from `src/runboard/static/`, so with an editable install a browser
 refresh picks up changes to `app.js` and `style.css`.
 
@@ -34,8 +42,8 @@ refresh picks up changes to `app.js` and `style.css`.
 
 ## Releasing (maintainers)
 
-1. Bump `version` in `pyproject.toml` and `__version__` in `src/runboard/__init__.py`, and update
-   `CHANGELOG.md`.
+1. Bump `version` in `pyproject.toml`, `__version__` in `src/runboard/__init__.py`, and the
+   `runboard/X.Y` user agent in `client.py`, `cli.py`, and `doctor.py`, and update `CHANGELOG.md`.
 2. Commit, then tag `vX.Y.Z` and push the tag.
 3. Create a GitHub release from the tag. The `Publish to PyPI` workflow builds the package and uploads
    it through PyPI trusted publishing.

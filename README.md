@@ -70,9 +70,17 @@ runboard configure https://runboard.<account>.workers.dev
 ```
 
 The command asks for the same token, verifies the deployment, and saves both values in
-`~/.runboard/server.json` with mode `600`.
+`~/.runboard/server.json` with mode `600`. Run `runboard doctor` at any time to check the connection;
+it sends a test run and ends with `PASS`, or `FAIL` and the fix.
 
-**3. Log from your training script:**
+**3. Stream your training job.** If it already writes TensorBoard, JSONL, CSV, or Hugging Face logs, or
+prints lines like `loss=0.42`, wrap the launch command and change nothing else:
+
+```bash
+runboard run --project resnet -- python train.py
+```
+
+To log custom metrics from code instead:
 
 ```python
 import runboard
@@ -233,8 +241,10 @@ settings into the job:
 ```bash
 export RUNBOARD_SERVER="https://runboard.<account>.workers.dev"
 export RUNBOARD_TOKEN="your-token"
-python train.py
+runboard run --project resnet -- python train.py
 ```
+
+Use `python train.py` directly when the script calls `runboard.init()` itself.
 
 Only outbound HTTPS is required. There is no Runboard daemon on the login node and no tunnel to keep
 alive.
@@ -382,6 +392,7 @@ pip install -e ".[dev]"
 pytest
 npm install
 npm run check:cloud
+node tests/js/binned.test.cjs && node tests/js/app.test.cjs
 ```
 
 Try it end to end with `runboard serve` in one terminal and `python examples/quickstart.py` in another.

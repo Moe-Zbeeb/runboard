@@ -57,6 +57,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check:cloud
+      - run: node tests/js/binned.test.cjs && node tests/js/app.test.cjs
       - run: |
           printf 'RUNBOARD_TOKEN=integration-token\n' > .dev.vars
           npm run dev -- --port 8787 > /tmp/runboard-worker.log 2>&1 &

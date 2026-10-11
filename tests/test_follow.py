@@ -6,6 +6,7 @@ import pytest
 
 from runboard.follow import Record, to_record
 from runboard.follow.csvfile import CsvFollower
+from runboard.follow.discover import best, classify, scan
 from runboard.follow.hf_state import HfStateFollower
 from runboard.follow.jsonl import JsonlFollower
 from runboard.follow.text import StreamFollower, TextFollower, parse_line
@@ -122,3 +123,46 @@ def test_text_follower_reads_a_log_file(tmp_path):
     path = tmp_path / "slurm-1.out"
     path.write_text("step=1 loss=0.5\rstep=2 loss=0.25\nloading data\n")
     assert TextFollower(path).poll() == [Record(1, None, {"loss": 0.5}), Record(2, None, {"loss": 0.25})]
+
+
+def _touch(path, mtime=None):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x")
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+
+
+def test_classify_known_files():
+    assert classify("events.out.tfevents.1.host") == "tensorboard"
+    assert classify("train.jsonl") == "table"
+    assert classify("metrics.csv") == "table"
+    assert classify("results.csv") is None
+    assert classify("trainer_state.json") == "hf"
+    assert classify("train.log") is None
+
+
+def test_scan_prefers_tensorboard_and_skips_noise(tmp_path):
+    _touch(tmp_path / "runs/exp/events.out.tfevents.1.host")
+    _touch(tmp_path / "logs/metrics.jsonl")
+    _touch(tmp_path / ".hidden/events.out.tfevents.2.host")
+    _touch(tmp_path / "node_modules/x/metrics.jsonl")
+    _touch(tmp_path / "a/b/c/d/e/events.out.tfevents.3.host")
+    _touch(tmp_path / "results.csv")
+    found = scan([tmp_path])
+    assert found["tensorboard"] == [(tmp_path / "runs/exp/events.out.tfevents.1.host").resolve()]
+    assert found["table"] == [(tmp_path / "logs/metrics.jsonl").resolve()]
+    assert best(found) == ("tensorboard", found["tensorboard"])
+
+
+def test_scan_ignores_files_older_than_since(tmp_path):
+    _touch(tmp_path / "old/metrics.jsonl", mtime=1000)
+    _touch(tmp_path / "new/metrics.jsonl")
+    assert scan([tmp_path], since=2000)["table"] == [(tmp_path / "new/metrics.jsonl").resolve()]
+
+
+def test_scan_stops_at_the_file_limit_and_deduplicates_roots(tmp_path):
+    for index in range(3):
+        _touch(tmp_path / f"logs/{index}.jsonl")
+    assert len(scan([tmp_path], max_files=2)["table"]) == 2
+    assert len(scan([tmp_path, tmp_path / "logs"])["table"]) == 3
+    assert best(scan([tmp_path / "missing"])) == (None, [])

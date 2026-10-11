@@ -8,6 +8,7 @@ import pytest
 from helpers import wait_for
 from runboard.runner import _pipe, build_config, default_name
 
+
 CHILD = """
 import json, sys
 with open("metrics.jsonl", "a") as f:
@@ -123,3 +124,42 @@ def test_build_config_and_default_name(tmp_path):
     assert config["command"] == ["python", "train.py"]
     assert default_name(["torchrun", "--nproc_per_node", "8", "train.py"]).startswith("train-")
     assert default_name(["python", "-m", "pkg.trainer"]).startswith("trainer-")
+
+
+def test_watch_once_twice_continues_one_run_without_duplicates(tmp_path, server, monkeypatch):
+    from runboard.cli import main
+
+    monkeypatch.setenv("RUNBOARD_SERVER", f"http://127.0.0.1:{server.port}")
+    monkeypatch.setenv("RUNBOARD_TOKEN", "secret")
+    logs = tmp_path / "out"
+    logs.mkdir()
+    (logs / "metrics.jsonl").write_text('{"step": 1, "loss": 1}\n')
+    main(["watch", str(logs), "--once", "--project", "p"])
+    created = server.storage.list_runs()[0]["created"]
+    with open(logs / "metrics.jsonl", "a") as f:
+        f.write('{"step": 2, "loss": 2}\n')
+    main(["watch", str(logs), "--once", "--project", "p"])
+    runs = server.storage.list_runs()
+    assert len(runs) == 1 and runs[0]["status"] == "finished" and runs[0]["created"] == created
+    assert [r["loss"] for r in server.storage.read_rows("p", runs[0]["run_id"])[0]] == [1.0, 2.0]
+
+
+def test_watch_reads_a_slurm_output_file(tmp_path, server, monkeypatch):
+    from runboard.cli import main
+
+    monkeypatch.setenv("RUNBOARD_SERVER", f"http://127.0.0.1:{server.port}")
+    monkeypatch.setenv("RUNBOARD_TOKEN", "secret")
+    (tmp_path / "slurm-1.out").write_text("loading\nstep=1 loss=0.5\n")
+    main(["watch", "--stdout-file", str(tmp_path / "slurm-1.out"), "--once", "--project", "p", "--run-id", "slurm"])
+    assert [r["loss"] for r in server.storage.read_rows("p", "slurm")[0]] == [0.5]
+
+
+def test_watch_rejects_missing_paths(tmp_path):
+    from runboard.cli import main
+
+    with pytest.raises(SystemExit) as e:
+        main(["watch", str(tmp_path / "missing")])
+    assert e.value.code == 2
+    with pytest.raises(SystemExit) as e:
+        main(["watch"])
+    assert e.value.code == 2

@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from . import __version__, config
 from .client import sync
-from .runner import run_command
+from .runner import run_command, watch_command
 from .server import Server
 from .storage import Storage
 
@@ -187,6 +187,17 @@ def main(argv=None):
     s.add_argument("--config", action="append", default=[], metavar="KEY=VALUE", help="record a hyperparameter")
     s.add_argument("command", nargs=argparse.REMAINDER, help="the command to run, after --")
     s.set_defaults(func=run_command)
+
+    s = sub.add_parser("watch", help="stream metrics from existing log files or directories")
+    s.add_argument("paths", nargs="*", metavar="PATH", help="metric files or directories to follow")
+    s.add_argument("--project", help="dashboard project (default: current directory name)")
+    s.add_argument("--name", help="display name (default: the run id)")
+    s.add_argument("--run-id", help="run id (default: stable id derived from the first path)")
+    s.add_argument("--stdout-file", metavar="FILE", help="read metrics from a text log such as a Slurm .out file")
+    s.add_argument("--once", action="store_true", help="upload what exists and exit")
+    s.add_argument("--config-json", metavar="FILE", help="record hyperparameters from a JSON file")
+    s.add_argument("--config", action="append", default=[], metavar="KEY=VALUE", help="record a hyperparameter")
+    s.set_defaults(func=watch_command)
 
     s = sub.add_parser("configure", help="save and verify a hosted Runboard server")
     s.add_argument("server", help="Runboard URL, such as https://runboard.<account>.workers.dev")

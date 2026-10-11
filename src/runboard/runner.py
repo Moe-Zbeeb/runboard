@@ -1,8 +1,10 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -398,3 +400,59 @@ def run_command(args):
         streamer.save()
         _summary(run, streamer, status)
     return 128 - code if code < 0 else code
+
+
+def default_watch_id(path):
+    path = Path(path).resolve()
+    digest = hashlib.sha256(f"{socket.gethostname()}{path}".encode()).hexdigest()[:8]
+    base = re.sub(r"[^A-Za-z0-9._-]", "-", path.name).strip(".")[:110] or "watch"
+    return f"{base}-{digest}"
+
+
+def watch_command(args):
+    paths = [Path(path) for path in args.paths]
+    extra = [Path(args.stdout_file)] if args.stdout_file else []
+    if not paths and not extra:
+        _say("nothing to watch; give a file or directory, or --stdout-file FILE")
+        return 2
+    missing = [str(path) for path in paths + extra if not path.exists()]
+    if missing:
+        _say(f"no such file or directory: {', '.join(missing)}")
+        return 2
+    roots = [path for path in paths if path.is_dir()]
+    sources = [(discover.classify(path) or "stdout", path) for path in paths if path.is_file()]
+    sources += [("stdout", path) for path in extra]
+    run_id = args.run_id or default_watch_id((paths + extra)[0])
+    config = build_config(["runboard", "watch"] + [str(path) for path in paths + extra], args.config_json, args.config)
+    try:
+        run = Run(project=args.project or Path.cwd().name, name=args.name or run_id, run_id=run_id, config=config)
+    except Exception as e:
+        _say(f"setup failed ({e})")
+        return 1
+    streamer = Streamer(run, roots=roots, sources=sources, state_file=state_path(run.project, run.run_id), config=config)
+    streamer.created = streamer.created or time.time()
+    run._set_meta(created=streamer.created)
+    stop = threading.Event()
+    previous = signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
+    status = "finished"
+    try:
+        if args.once:
+            streamer.drain()
+        else:
+            _say(f"watching {run.project}/{run.run_id}; press Ctrl-C to stop")
+            while not stop.is_set():
+                streamer.step()
+                stop.wait(1.0)
+            status = "killed"
+    except KeyboardInterrupt:
+        status = "killed"
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    try:
+        streamer.drain()
+    except Exception as e:
+        _say(f"metric collection error ({e})")
+    run.finish(status)
+    streamer.save()
+    _say(f"{status}: logged {streamer.rows} rows to {run.project}/{run.run_id}")
+    return 0

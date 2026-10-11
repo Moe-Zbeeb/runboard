@@ -45,6 +45,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   processed concurrently.
 - The dashboard escapes run status values.
 - The local server closes the connection after rejecting an oversized request body.
+- A server URL without `https://`, such as `runboard.<account>.workers.dev`, no longer makes
+  `runboard.init()` raise into training code or `runboard configure` fail with a traceback; `https://` is
+  added automatically.
+- Run configs with non-string keys no longer block delivery and make `finish()` raise at exit.
+- `runboard sync` moves an unreadable spool file aside as `*.jsonl.corrupt` and continues, and reports an
+  unreachable server without a traceback.
+- The Cloudflare Worker accepts rows without `_sid`/`_seq` again and handles batches from many client
+  sessions within D1's 100-parameter limit.
 - `runboard sync` replays spool files in the order they were written. Spool file names now include a
   creation stamp.
 - The README states the actual dashboard refresh and HTTP send intervals.

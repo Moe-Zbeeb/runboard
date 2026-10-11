@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from . import __version__, config
 from .client import sync
+from .doctor import doctor
 from .runner import run_command, watch_command
 from .server import Server
 from .storage import Storage
@@ -150,6 +151,10 @@ def cmd_configure(args):
     print(f"dashboard: {server}/?token={quote(token, safe='')}")
 
 
+def cmd_doctor(args):
+    return doctor(args.server, args.token)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="runboard", description="Live training dashboards for any cluster.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -198,6 +203,11 @@ def main(argv=None):
     s.add_argument("--config-json", metavar="FILE", help="record hyperparameters from a JSON file")
     s.add_argument("--config", action="append", default=[], metavar="KEY=VALUE", help="record a hyperparameter")
     s.set_defaults(func=watch_command)
+
+    s = sub.add_parser("doctor", help="check where metrics go and send a test run")
+    s.add_argument("--server", help="check this server instead of the configured one")
+    s.add_argument("--token", help="token for --server")
+    s.set_defaults(func=cmd_doctor)
 
     s = sub.add_parser("configure", help="save and verify a hosted Runboard server")
     s.add_argument("server", help="Runboard URL, such as https://runboard.<account>.workers.dev")

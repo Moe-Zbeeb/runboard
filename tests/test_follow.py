@@ -1,7 +1,10 @@
 import json
+import os
+import time
 
 from runboard.follow import Record, to_record
 from runboard.follow.csvfile import CsvFollower
+from runboard.follow.hf_state import HfStateFollower
 from runboard.follow.jsonl import JsonlFollower
 
 
@@ -56,3 +59,29 @@ def test_csv_follower_rereads_header_after_truncation(tmp_path):
     follower.poll()
     path.write_text("step,acc\n1,0.9\n")
     assert follower.poll() == [Record(1, None, {"acc": 0.9})]
+
+
+def _write_state(directory, history, mtime):
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "trainer_state.json"
+    path.write_text(json.dumps({"global_step": history[-1]["step"], "log_history": history}))
+    os.utime(path, (mtime, mtime))
+
+
+def test_hf_state_follows_newest_checkpoint_without_repeats(tmp_path):
+    first = [{"loss": 1.0, "learning_rate": 5e-05, "epoch": 0.5, "step": 10}, {"eval_loss": 0.9, "epoch": 0.5, "step": 10}]
+    _write_state(tmp_path / "checkpoint-10", first, time.time() - 100)
+    follower = HfStateFollower(tmp_path)
+    assert follower.poll() == [
+        Record(10, None, {"loss": 1.0, "learning_rate": 5e-05, "epoch": 0.5}),
+        Record(10, None, {"eval_loss": 0.9, "epoch": 0.5}),
+    ]
+    assert follower.poll() == []
+    _write_state(tmp_path / "checkpoint-20", first + [{"loss": 0.5, "epoch": 1.0, "step": 20}], time.time())
+    assert follower.poll() == [Record(20, None, {"loss": 0.5, "epoch": 1.0})]
+    assert HfStateFollower(tmp_path, follower.state()).poll() == []
+
+
+def test_hf_state_reads_a_direct_file(tmp_path):
+    _write_state(tmp_path, [{"loss": 2.0, "step": 1}], time.time())
+    assert HfStateFollower(tmp_path / "trainer_state.json").poll() == [Record(1, None, {"loss": 2.0})]

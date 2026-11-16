@@ -19,6 +19,22 @@ runboard has a dependency-free Python client, two interchangeable backends, and 
 | `static/` | The dashboard: `index.html`, `app.js` (state, polling, rendering), `view.js` (pure formatting and layout helpers), `binned.js` (relationship charts), `style.css`, `unauthorized.html`, bundled uPlot |
 | `cloudflare/src/worker.js` | Hosted REST API, authentication, D1 storage, static assets |
 
+## Terminal views
+
+`runboard top` and `runboard plot` read runs through `viewer.Source`: a `LocalSource` over a runs directory
+or an `HttpSource` over the same REST API the dashboard uses. `viewer.Store` keeps each run's byte or batch
+offset and fetches only new pages when a run's `status` or `updated` value changes, like the dashboard.
+
+`termplot.render_chart` returns a chart as lines of `(text, style)` segments, where a style is a series
+index, a status name, or `bold`, `dim`, or `rev`. `to_ansi` turns those lines into escape codes for
+`plot`; `top` paints the same segments with `curses` attributes. Points are mapped to a braille canvas
+with 2 × 4 dots per cell; each screen column keeps its first, last, minimum, and maximum value, so
+downsampling never hides a spike.
+
+`top` keeps all state in `Model` and all drawing in `screen()`, both pure and tested without a terminal.
+A background thread refreshes every few seconds under the model's lock; the `curses` loop only translates
+keys and paints lines, and skips a frame rather than block while a refresh holds the lock.
+
 ## Design constraints
 
 - **Portable.** It must run on any Linux or macOS machine the user can log into: no root, no inbound

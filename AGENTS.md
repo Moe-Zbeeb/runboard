@@ -111,6 +111,7 @@ Every endpoint requires the same bearer token, query token, or dashboard cookie.
 | `tests/` | Python client, local server, storage, delivery, and compatibility tests. |
 | `examples/` | Minimal Python, PyTorch, and Slurm usage. |
 | `docs/architecture.md` | Detailed design and delivery guarantees. |
+| `docs/terminal.md` | User guide for `runboard top` and `runboard plot`. Its images in `docs/assets/terminal-*` are rendered from real `top` sessions. |
 | `wrangler.jsonc` | Deploy-button and repository-root Cloudflare configuration. |
 | `cloudflare/wrangler.jsonc` | Isolated Cloudflare project configuration. |
 

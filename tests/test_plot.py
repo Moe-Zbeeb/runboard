@@ -60,3 +60,11 @@ def test_plot_reports_missing_runs(tmp_path, capsys):
     seed(tmp_path / "runs")
     code, _, err = run_plot(["no-such-run", "--dir", str(tmp_path / "runs")], capsys)
     assert code == 1 and "no-such-run" in err
+
+
+def test_a_lone_chart_in_a_section_uses_the_full_width(tmp_path, capsys):
+    seed(tmp_path / "runs")
+    code, out, _ = run_plot(["--dir", str(tmp_path / "runs"), "--color", "never", "--width", "120", "--metric", "^eval"], capsys)
+    assert code == 0
+    axis = next(line for line in out.splitlines() if "└" in line)
+    assert len(axis.rstrip()) > 100

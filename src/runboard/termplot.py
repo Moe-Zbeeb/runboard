@@ -195,7 +195,7 @@ def _y_ticks(lo, hi, rows, logy):
         step = max(1, math.ceil(len(ticks) / max(2, rows // 2)))
         ticks = ticks[::-1][::step][::-1] or [lo]
         return [(t, tick(10.0 ** t)) for t in ticks]
-    return [(t, tick(t)) for t in nice_ticks(lo, hi, max(2, rows // 2))]
+    return [(t, tick(t)) for t in nice_ticks(lo, hi, max(2, min(8, rows // 2)))]
 
 
 def _draw(canvas, pts, color, xlo, xhi, ylo, yhi):

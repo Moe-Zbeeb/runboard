@@ -31,6 +31,8 @@ need to host a server and the dashboard keeps the same URL when jobs, login node
 - **One stable URL.** Jobs and browsers connect to the same `workers.dev` HTTPS endpoint from anywhere.
 - **Zero dependencies.** The client, server, and dashboard use only the Python standard library.
   `pip install runboard` works on any cluster, even behind a restrictive proxy.
+- **Charts in your terminal too.** `runboard top` is a live, keyboard-driven dashboard for SSH sessions
+  and tmux; `runboard plot` prints the same charts once. See [Charts in the terminal](#charts-in-the-terminal).
 - **Keeps network and disk work out of training.** `log()` appends metrics in memory; a background
   thread sends batches, retries outages, and spills excess backlog to disk. Remaining metrics are
   saved when the run finishes.
@@ -336,39 +338,22 @@ previous step. Run the JavaScript contract check with `node tests/js/binned.test
 
 ## Charts in the terminal
 
-Over SSH, inside tmux, or anywhere a browser is inconvenient, the same charts render in the terminal.
-They read the same server as `runboard ls`, or a runs directory with `--dir`, so they also work on
-clusters with no internet access.
+Watching a run from an SSH session, inside tmux, or on a cluster with no browser? The same charts render in
+the terminal, from the same server as the web dashboard.
+
+<p align="center">
+  <img alt="runboard top: selecting runs, smoothing, paging through charts, filtering to score metrics, and opening one chart full screen" src="https://raw.githubusercontent.com/Moe-Zbeeb/runboard/main/docs/assets/terminal-top.gif" width="100%">
+</p>
 
 ```bash
-runboard top                        # live, full-screen, refreshes every 5 seconds
-runboard plot                       # print the charts once and exit
-runboard plot "lr=3e-4" -m 'loss|acc' --smooth 0.6
+runboard top                                   # live and full screen; refreshes every 5 seconds
+runboard plot                                  # print the charts once and exit
+runboard plot "lr=3e-4" -m "loss|acc" --smooth 0.6
+runboard top --dir ~/runboard-runs             # read a runs directory instead of the server
 ```
 
-```text
-runboard  grpo-gsm8k  ./runboard-runs
-■ kl_coef=0.01  ● running   ■ kl_coef=0 (diverged)  ✕ crashed
-■ kl_coef=0.001  ✓ finished
-
-── critic 1 chart ──────────────────────────────────────────────────────────────────
-
-critic/score/mean                                                           step 619
-    │                                                         ⢀⡀⣀⣀⣀  ⣠⣄⣀⣄⣠⣀⣄⣠⣄⣤⣤⣤⣄⣠⣄
-    │                                ⣀⣀⣤⣠⣤⣤⣶⣶⣶⣶⣶⠦⠶⣶⣿⣛⡳⠺⣙⣷⣟⣿⣳⡿⡿⠿⠯⠟⠉⠉⠋⠙⠁⠈⠉ ⠁ ⠈⠁    ⠉⠈
- 0.5┤                    ⢀⡀⣀⣠⢤⣶⣶⣶⣶⠿⠻⠿⢟⡛⣛⣩⣙⣥⡴⠶⠓⠷⠲⠖⠺⠙⠋⠉⠻⡍⠉   ⠈
-    │               ⢀⣀⣤⣶⡿⠿⣬⣟⠛⣫⣤⣰⠴⠶⠷⠋⠛⠛⠙⠉⠁⠉            ⠱⣄
-    │          ⢀⣠⣶⣾⠟⣿⣫⡽⠶⠶⠓⠏⠙⠉⠁ ⠈                       ⠈⡆
-   0┤      ⢀⣠⣷⣿⣛⣫⡴⠓⠛⠁⠁⠁                                 ⠸⠄
-    │  ⢀⣀⣤⢯⢿⠳⠛⠚⠉⠁
--0.5┤⣠⣴⡿⠿⠉⠉
-    │⠚⠁
-    └┬────────────────────────┬────────────────────────┬─────────────────────────┬──
-     0                       200                      400                       600
-■ kl_coef=0.01 0.66226  ■ kl_coef=0 (diverged) -0.17069  ■ kl_coef=0.001 0.70491
-```
-
-**`runboard top`** is a live dashboard: runs on the left, charts on the right.
+**`runboard top`** puts your runs on the left and their charts on the right, grouped by metric prefix.
+Each chart lists every run's latest value, and the header says when the data last refreshed.
 
 | Key | Action |
 |---|---|
@@ -376,18 +361,23 @@ critic/score/mean                                                           step
 | <kbd>a</kbd> / <kbd>c</kbd> | Select every run in the project / clear the selection |
 | <kbd>[</kbd> <kbd>]</kbd> | Previous or next project, then all projects |
 | <kbd>tab</kbd> | Switch between the run list and the charts; arrows and <kbd>PgUp</kbd> <kbd>PgDn</kbd> scroll the charts |
-| <kbd>enter</kbd> or <kbd>f</kbd>, then <kbd>←</kbd> <kbd>→</kbd> | Show one chart full screen and step through the others; <kbd>esc</kbd> returns |
+| <kbd>f</kbd>, then <kbd>←</kbd> <kbd>→</kbd> | Show one chart full screen and step through the others; <kbd>esc</kbd> returns |
 | <kbd>/</kbd> | Filter metrics with a regex |
 | <kbd>s</kbd> <kbd>l</kbd> <kbd>o</kbd> <kbd>x</kbd> | Cycle smoothing, toggle log y, toggle outlier clipping, switch the x axis between step, minutes, and clock time |
 | <kbd>r</kbd> <kbd>?</kbd> <kbd>q</kbd> | Refresh now, help, quit |
 
-**`runboard plot`** prints the charts once, so it works in scripts, CI logs, and coding agents. With no
-run names it picks the most recent runs of the most recently active project, like the dashboard. It
-colors output only when writing to a terminal; pass `--color never` or `--color always` to choose.
+**`runboard plot`** prints the charts once, so it fits scripts, CI logs, the end of a Slurm job, and
+coding agents. With no run names it picks the most recent runs of the most recently active project,
+like the dashboard, and it colors output only when writing to a terminal.
 
-Lines are drawn with braille characters, which gives each character cell 2 × 4 dots. Long runs are
-reduced per screen column to their minimum and maximum, so a single spike stays visible. Both
-commands need only the Python standard library; `top` uses `curses`, which macOS and Linux include.
+<p align="center">
+  <img alt="runboard plot output: KL, mean score, and GSM8K accuracy for three GRPO runs, one of which diverges" src="https://raw.githubusercontent.com/Moe-Zbeeb/runboard/main/docs/assets/terminal-plot.png" width="82%">
+</p>
+
+Both commands need only the Python standard library. Lines are drawn with braille characters, 2 × 4 dots
+per character cell, and long runs are reduced per screen column to their minimum and maximum, so a single
+spike stays visible. The [terminal guide](docs/terminal.md) covers SSH and offline-cluster setups, every
+option, and troubleshooting.
 
 ## Configuration
 

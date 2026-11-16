@@ -54,23 +54,24 @@ def section_line(name, count, width):
 
 def grid(store, keys, slots, metrics, width, height, opts, columns, gap=3, index=None):
     lines = []
-    col_w = max(30, (width - gap * (columns - 1)) // columns)
     groups = {}
     for m in metrics:
         groups.setdefault(group_of(m), []).append(m)
     for g in sorted(groups, key=lambda name: (name != "", name)):
         names = groups[g]
+        per_row = max(1, min(columns, len(names)))
+        col_w = max(30, (width - gap * (per_row - 1)) // per_row)
         lines.append(Line(width).done())
         lines.append(section_line(g, len(names), width))
-        for start in range(0, len(names), columns):
-            blocks = [metric_block(store, keys, slots, m, col_w, height, opts) for m in names[start:start + columns]]
+        for start in range(0, len(names), per_row):
+            blocks = [metric_block(store, keys, slots, m, col_w, height, opts) for m in names[start:start + per_row]]
             tall = max(len(b) for b in blocks)
             blank = Line(col_w).done()
             for b in blocks:
                 b.extend([blank] * (tall - len(b)))
             lines.append(Line(width).done())
             if index is not None:
-                index.extend((len(lines), m) for m in names[start:start + columns])
+                index.extend((len(lines), m) for m in names[start:start + per_row])
             for row in range(tall):
                 merged = Line(width)
                 for i, b in enumerate(blocks):

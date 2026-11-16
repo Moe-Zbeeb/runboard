@@ -70,6 +70,8 @@ Every endpoint requires the same bearer token, query token, or dashboard cookie.
 - Update both copies in the same change.
 - `test_cloudflare_dashboard_matches_python_package` enforces this requirement.
 - Dashboard HTML requests `/static/*`. The Worker intentionally rewrites those paths to the root of the Cloudflare asset binding. Preserve that mapping.
+- `unauthorized.html` is the 401 page for both backends. The Python server reads it from `src/runboard/static/`; the Worker fetches it from its asset binding and falls back to a one-line message.
+- Pure dashboard logic, such as number formatting, point density, outlier ranges, config diffs, and DOM ordering, belongs in `view.js` with a test in `tests/js/view.test.cjs`. `app.js` holds state, polling, and rendering.
 - `src/runboard/AGENT_GUIDE.md` and `docs/integrating.md` must stay byte-identical; `test_agent_guide_matches_docs_copy` enforces this.
 
 ### Cloudflare must stay free-tier compatible
@@ -221,6 +223,12 @@ runboard serve --dir /tmp/runboard-runs
 python examples/quickstart.py
 ```
 
+Run the dashboard JavaScript tests:
+
+```bash
+node tests/js/binned.test.cjs && node tests/js/app.test.cjs && node --test tests/js/view.test.cjs
+```
+
 Validate the Cloudflare bundle:
 
 ```bash
@@ -256,7 +264,7 @@ Choose checks that exercise the changed contract:
 |---|---|
 | Client buffering, retry, rank, or spool behavior | Python tests, including a focused failure-path test. |
 | Local API or storage | Python server/storage tests and offset or deduplication coverage. |
-| Dashboard HTML, CSS, or JavaScript | Python tests, mirrored-asset check, and a browser smoke test. |
+| Dashboard HTML, CSS, or JavaScript | Python tests, dashboard JavaScript tests, mirrored-asset check, and a browser smoke test that includes a live run, so the page is watched while it refreshes. |
 | Worker routing, auth, D1, or limits | Wrangler dry run and local or deployed Worker protocol test. |
 | Packaging or entry points | Build, Twine check, and wheel smoke test. |
 | Deploy-button or Wrangler metadata | Root deploy form inspection and Wrangler dry run. |

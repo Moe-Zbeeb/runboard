@@ -59,12 +59,7 @@ def make_handler(storage, token):
             if urlparse(self.path).path.startswith("/api/"):
                 self._send(401, {"error": "unauthorized"})
             else:
-                self._send(
-                    401,
-                    "<h3>runboard: unauthorized</h3><p>Open the URL printed by <code>runboard serve</code> "
-                    "(it ends with <code>?token=...</code>).</p>",
-                    "text/html; charset=utf-8",
-                )
+                self._send(401, (STATIC_DIR / "unauthorized.html").read_bytes(), "text/html; charset=utf-8")
 
         def do_HEAD(self):
             self.do_GET()

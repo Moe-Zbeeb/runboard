@@ -59,3 +59,13 @@ def test_server_closes_connection_after_oversized_body(server):
                 break
             data += chunk
     assert data.startswith(b"HTTP/1.1 413")
+
+
+def test_server_explains_how_to_open_the_dashboard_without_a_token(server):
+    with pytest.raises(urllib.error.HTTPError) as e:
+        http_get(server, "/", token=None)
+    assert e.value.code == 401
+    assert e.value.headers["Content-Type"].startswith("text/html")
+    body = e.value.read().decode()
+    assert "<title>" in body and "?token=" in body and "runboard url" in body
+    assert "prefers-color-scheme: dark" in body

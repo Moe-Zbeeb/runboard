@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runboard: access token needed</title>
+<style>
+:root { color-scheme: light; --page: #dce4e0; --surface: #e9efec; --ink: #1d2940; --muted: #5b6a64; --rule: #c3d0ca; --good: #1e6b47; }
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; --page: #111823; --surface: #172131; --ink: #e4ece8; --muted: #93a39c; --rule: #2b3850; --good: #5cc593; }
+}
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--page); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 31rem; margin: 16px; padding: 26px 28px; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+svg { width: 30px; height: 16px; color: var(--good); display: block; margin-bottom: 14px; }
+h1 { font-size: 19px; margin: 0 0 10px; letter-spacing: -0.01em; }
+p { margin: 10px 0 0; color: var(--muted); }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 30 16" aria-hidden="true"><polyline points="0,9 10,9 13,3 16,14 19,9 30,9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>
+  <h1>This dashboard needs its access token</h1>
+  <p>Open the full dashboard URL, the one that ends in <code>?token=…</code>. After that, this browser remembers the token and the plain URL works.</p>
+  <p>To print the URL, run <code>runboard url</code> on a machine where Runboard is configured.</p>
+</main>
+</body>
+</html>

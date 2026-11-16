@@ -231,12 +231,20 @@ async function getMetrics(env, url) {
   return response({ rows, offset });
 }
 
+async function unauthorizedPage(env, url) {
+  try {
+    const page = await env.ASSETS.fetch(new Request(new URL("/unauthorized", url)));
+    if (page.ok) return await page.text();
+  } catch {}
+  return "<h3>runboard: access token needed</h3><p>Open the full dashboard URL, the one that ends in <code>?token=…</code>. <code>runboard url</code> prints it.</p>";
+}
+
 async function handle(request, env) {
   const url = new URL(request.url);
   const authorized = await authorize(request, env, url);
   if (!authorized) {
     if (url.pathname.startsWith("/api/")) return response({ error: "unauthorized" }, 401);
-    return response("<h3>runboard: unauthorized</h3><p>Open your dashboard URL with its <code>?token=...</code> value.</p>", 401);
+    return response(await unauthorizedPage(env, url), 401);
   }
   if (url.pathname === "/" && url.searchParams.has("token")) {
     return response("", 302, {

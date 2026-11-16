@@ -12,10 +12,14 @@ function element() {
     hidden: false,
     dataset: {},
     style: {},
+    children: [],
     clientWidth: 800,
     classList: { add() {}, remove() {}, toggle() {} },
     addEventListener() {},
     appendChild() {},
+    insertBefore() {},
+    setAttribute() {},
+    focus() {},
     remove() {},
     showModal() {},
     querySelector() { return element(); },
@@ -59,7 +63,7 @@ context.window = context;
 context.globalThis = context;
 
 vm.createContext(context);
-for (const file of ["binned.js", "app.js"]) {
+for (const file of ["binned.js", "view.js", "app.js"]) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/runboard/static", file), "utf8"), context);
 }
 

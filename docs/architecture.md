@@ -12,7 +12,7 @@ runboard has a dependency-free Python client, two interchangeable backends, and 
 | `runner.py` | `Streamer`, the `run` wrapper, and `watch`; follower state in `~/.runboard/followers/` |
 | `follow/` | TensorBoard, JSONL, CSV, Hugging Face state, and text followers; discovery |
 | `doctor.py` | Configuration report and write/read check |
-| `static/` | The dashboard: `index.html`, `app.js`, `style.css`, bundled uPlot |
+| `static/` | The dashboard: `index.html`, `app.js` (state, polling, rendering), `view.js` (pure formatting and layout helpers), `binned.js` (relationship charts), `style.css`, `unauthorized.html`, bundled uPlot |
 | `cloudflare/src/worker.js` | Hosted REST API, authentication, D1 storage, static assets |
 
 ## Design constraints

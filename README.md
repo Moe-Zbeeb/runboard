@@ -297,13 +297,23 @@ or set `export RUNBOARD_DIR=~/runboard-runs` in your job script. The server pick
 
 ## The dashboard
 
-- **Runs sidebar.** Search, project filter, and status badges. Click a run's name to see its config and metadata.
-- **Compare runs.** Select up to 8 runs. Each run keeps its color while it stays selected.
-- **One chart per metric.** Hover for exact values, drag to zoom, double-click to reset. Legends show each run's latest value.
-- **Controls.** EMA smoothing, log-scale y, x axis as step, relative time, or wall clock, a regex metric filter, and system/light/dark themes.
-- **Long runs.** Charts retain peaks and dips while reducing very large series to a display-sized sample. Original metrics remain in the JSONL files.
-- **Summary table.** Latest value of every metric for the selected runs.
-- A responsive layout for phones and desktops.
+- **Runs sidebar.** Search, a project filter, status badges, and a trace of recent metric writes. Click a
+  run's name for its start and finish times, duration, host, Slurm job, command, tags, and config.
+- **Up to 8 runs at once.** Each run keeps its color while it stays selected. Choosing a project plots
+  only that project's runs. Hover a run in the sidebar to highlight it in every chart.
+- **One chart per metric, grouped by prefix.** `train/loss` and `train/lr` land in a collapsible
+  `train` section. Below each chart is every run's latest value.
+- **Linked hover and zoom.** Hovering one chart moves the crosshair on all of them and shows each run's
+  value at that step. Drag to zoom every chart to the same steps; **Reset zoom**, a double-click, or
+  <kbd>Esc</kbd> returns to the full range.
+- **Controls.** EMA smoothing with the raw values drawn faintly behind, log-scale y, **Clip outliers**
+  to ignore rare spikes when scaling the y axis, x axis as step, relative time, or wall clock, a regex
+  metric filter (<kbd>/</kbd> focuses it), and light, dark, or system themes.
+- **Compare runs.** A side-by-side table of the selected runs: status, duration, latest step, the
+  config keys that differ between them, and the latest value of every metric.
+- **Long runs.** Charts keep peaks and dips while reducing very large series to a display-sized sample.
+  Original metrics remain in storage.
+- A responsive layout. On phones, the run list folds away so the charts come first.
 
 ### Binned relationship plots
 
@@ -392,7 +402,7 @@ pip install -e ".[dev]"
 pytest
 npm install
 npm run check:cloud
-node tests/js/binned.test.cjs && node tests/js/app.test.cjs
+node tests/js/binned.test.cjs && node tests/js/app.test.cjs && node --test tests/js/view.test.cjs
 ```
 
 Try it end to end with `runboard serve` in one terminal and `python examples/quickstart.py` in another.

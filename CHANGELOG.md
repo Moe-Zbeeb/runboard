@@ -6,6 +6,51 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Hovering a chart moves a crosshair across every chart and shows a tooltip with each run's value at
+  that step. Dragging to zoom applies the same x range to every chart; a bar at the bottom of the page
+  shows the range, and **Reset zoom**, a double-click, or <kbd>Esc</kbd> clears it.
+- Each chart shows every run's latest value below the plot, and the values at the cursor while you hover.
+- Hovering a run in the sidebar, or its value below a chart, highlights that run in the charts.
+- **Clip outliers** scales the y axis to the 1st to 99th percentile of the visible data, so a rare loss
+  spike no longer flattens the curve.
+- With smoothing on, the raw values stay visible as a faint line behind each smoothed line.
+- Metric sections collapse and expand, and remember their state.
+- **Compare runs** lists the selected runs side by side: status, duration, latest step, the config keys
+  that differ between them, and the latest value of every metric.
+- Run details show the start and finish times, duration, host, Slurm job, command, tags, and a config
+  table, with the raw metadata one click away.
+- On phones, the run list folds into a **Runs** button so the charts are on the first screen.
+- <kbd>/</kbd> focuses the metric filter.
+- Opening the dashboard without its token shows a page that explains how to get the full URL.
+
+### Changed
+
+- The series palette has eight hues that stay distinguishable for colorblind viewers in both themes.
+- Axis ticks use short forms such as `20k` and `1.5M`; large values read as `104,858` instead of
+  `1.049e+5`.
+- Theme is a **Light**, **Dark**, or **System** menu instead of a cycling button.
+- Point markers appear only where points are far enough apart to see, instead of on every series with
+  fewer than 60 points.
+
+### Fixed
+
+- The page no longer jumps back toward the top every 5 seconds while a run is logging.
+- Chart legends show each run's latest value; they previously showed `–` for finished runs and for any
+  run that ended before the longest one.
+- Choosing a project now plots only that project's runs. Runs selected in another project were still
+  plotted, but hidden from the sidebar.
+- A saved project that no longer exists no longer hides every run.
+- The first visit selects the most recent runs of the most recently active project, instead of the
+  three newest runs from any project.
+- A metric filter that is not a valid regular expression is matched as plain text and marked, instead
+  of silently showing every metric.
+- Changing the theme recolors the sidebar immediately.
+- The top bar can wrap onto two lines without the sidebar sliding under it.
+- Smoothing is applied after sorting by the x axis, so wall-clock and relative-time views of resumed runs
+  smooth in the right order.
+
 ## [0.3.0] - 2026-10-12
 
 ### Added

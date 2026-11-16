@@ -20,6 +20,14 @@ test("requires authentication", { skip: !base }, async () => {
   assert.equal(result.status, 401);
 });
 
+test("explains how to open the dashboard without a token", { skip: !base }, async () => {
+  const result = await fetch(`${base}/`);
+  assert.equal(result.status, 401);
+  assert.match(result.headers.get("Content-Type"), /^text\/html/);
+  const body = await result.text();
+  assert.ok(body.includes("<title>") && body.includes("?token=") && body.includes("runboard url"));
+});
+
 test("stores, deduplicates, and reads metric batches", { skip: !base }, async () => {
   const runId = `test-${Date.now()}`;
   const payload = {

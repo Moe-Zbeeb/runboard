@@ -8,6 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `runboard top` shows live, full-screen charts in the terminal, over SSH or in tmux: a run list,
+  a chart grid grouped by metric prefix, a full-screen chart view, a metric filter, smoothing, log y,
+  outlier clipping, and step, minute, or clock-time x axes. It refreshes every 5 seconds.
+- `runboard plot` prints the same charts once, with color only when writing to a terminal. Both read
+  the configured server or a runs directory and need only the Python standard library.
 - Hovering a chart moves a crosshair across every chart and shows a tooltip with each run's value at
   that step. Dragging to zoom applies the same x range to every chart; a bar at the bottom of the page
   shows the range, and **Reset zoom**, a double-click, or <kbd>Esc</kbd> clears it.

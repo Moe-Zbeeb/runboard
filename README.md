@@ -47,6 +47,7 @@ need to host a server and the dashboard keeps the same URL when jobs, login node
 - [Cloudflare deployment](#cloudflare-deployment)
 - [Running on a cluster](#running-on-a-cluster)
 - [The dashboard](#the-dashboard)
+- [Charts in the terminal](#charts-in-the-terminal)
 - [Configuration](#configuration)
 - [CLI reference](#cli-reference)
 - [Security](#security)
@@ -333,6 +334,61 @@ training progress. The mean and quantile fields must share a common step with th
 bin count and x value; missing values are omitted rather than borrowed from a
 previous step. Run the JavaScript contract check with `node tests/js/binned.test.cjs`.
 
+## Charts in the terminal
+
+Over SSH, inside tmux, or anywhere a browser is inconvenient, the same charts render in the terminal.
+They read the same server as `runboard ls`, or a runs directory with `--dir`, so they also work on
+clusters with no internet access.
+
+```bash
+runboard top                        # live, full-screen, refreshes every 5 seconds
+runboard plot                       # print the charts once and exit
+runboard plot "lr=3e-4" -m 'loss|acc' --smooth 0.6
+```
+
+```text
+runboard  grpo-gsm8k  ./runboard-runs
+■ kl_coef=0.01  ● running   ■ kl_coef=0 (diverged)  ✕ crashed
+■ kl_coef=0.001  ✓ finished
+
+── critic 1 chart ──────────────────────────────────────────────────────────────────
+
+critic/score/mean                                                           step 619
+    │                                                         ⢀⡀⣀⣀⣀  ⣠⣄⣀⣄⣠⣀⣄⣠⣄⣤⣤⣤⣄⣠⣄
+    │                                ⣀⣀⣤⣠⣤⣤⣶⣶⣶⣶⣶⠦⠶⣶⣿⣛⡳⠺⣙⣷⣟⣿⣳⡿⡿⠿⠯⠟⠉⠉⠋⠙⠁⠈⠉ ⠁ ⠈⠁    ⠉⠈
+ 0.5┤                    ⢀⡀⣀⣠⢤⣶⣶⣶⣶⠿⠻⠿⢟⡛⣛⣩⣙⣥⡴⠶⠓⠷⠲⠖⠺⠙⠋⠉⠻⡍⠉   ⠈
+    │               ⢀⣀⣤⣶⡿⠿⣬⣟⠛⣫⣤⣰⠴⠶⠷⠋⠛⠛⠙⠉⠁⠉            ⠱⣄
+    │          ⢀⣠⣶⣾⠟⣿⣫⡽⠶⠶⠓⠏⠙⠉⠁ ⠈                       ⠈⡆
+   0┤      ⢀⣠⣷⣿⣛⣫⡴⠓⠛⠁⠁⠁                                 ⠸⠄
+    │  ⢀⣀⣤⢯⢿⠳⠛⠚⠉⠁
+-0.5┤⣠⣴⡿⠿⠉⠉
+    │⠚⠁
+    └┬────────────────────────┬────────────────────────┬─────────────────────────┬──
+     0                       200                      400                       600
+■ kl_coef=0.01 0.66226  ■ kl_coef=0 (diverged) -0.17069  ■ kl_coef=0.001 0.70491
+```
+
+**`runboard top`** is a live dashboard: runs on the left, charts on the right.
+
+| Key | Action |
+|---|---|
+| <kbd>↑</kbd> <kbd>↓</kbd> or <kbd>j</kbd> <kbd>k</kbd>, <kbd>space</kbd> | Move through runs and select up to 8 |
+| <kbd>a</kbd> / <kbd>c</kbd> | Select every run in the project / clear the selection |
+| <kbd>[</kbd> <kbd>]</kbd> | Previous or next project, then all projects |
+| <kbd>tab</kbd> | Switch between the run list and the charts; arrows and <kbd>PgUp</kbd> <kbd>PgDn</kbd> scroll the charts |
+| <kbd>enter</kbd> or <kbd>f</kbd>, then <kbd>←</kbd> <kbd>→</kbd> | Show one chart full screen and step through the others; <kbd>esc</kbd> returns |
+| <kbd>/</kbd> | Filter metrics with a regex |
+| <kbd>s</kbd> <kbd>l</kbd> <kbd>o</kbd> <kbd>x</kbd> | Cycle smoothing, toggle log y, toggle outlier clipping, switch the x axis between step, minutes, and clock time |
+| <kbd>r</kbd> <kbd>?</kbd> <kbd>q</kbd> | Refresh now, help, quit |
+
+**`runboard plot`** prints the charts once, so it works in scripts, CI logs, and coding agents. With no
+run names it picks the most recent runs of the most recently active project, like the dashboard. It
+colors output only when writing to a terminal; pass `--color never` or `--color always` to choose.
+
+Lines are drawn with braille characters, which gives each character cell 2 × 4 dots. Long runs are
+reduced per screen column to their minimum and maximum, so a single spike stays visible. Both
+commands need only the Python standard library; `top` uses `curses`, which macOS and Linux include.
+
 ## Configuration
 
 | Environment variable | Default | Purpose |
@@ -354,6 +410,8 @@ previous step. Run the JavaScript contract check with `node tests/js/binned.test
 | `runboard serve` | Start the server. Options: `--dir` (default `./runboard-runs`), `--port` (default 8080, falls back to a free port if taken), `--host`, `--tunnel`, `--notify URL`, `--advertise URL` (address jobs should use) |
 | `runboard ls [--dir D] [--server URL]` | List runs on the configured server, or in a local directory |
 | `runboard sync [files…]` | Upload spooled offline metrics |
+| `runboard top [RUN…]` | Live full-screen charts in the terminal. Options: `--project`, `--metric`, `--smooth`, `--logy`, `--clip`, `--x step\|minutes\|time`, `--interval`, `--dir`, `--server`, `--token` |
+| `runboard plot [RUN…]` | Print charts once. Same options as `top`, plus `--width`, `--height`, `--columns`, `--color auto\|always\|never` |
 | `runboard url` | Print the current dashboard URL |
 | `runboard --version` | Print the version |
 

@@ -93,10 +93,14 @@ Every endpoint requires the same bearer token, query token, or dashboard cookie.
 | `src/runboard/storage.py` | Local metadata and JSONL storage, validation, deduplication, and offsets. |
 | `src/runboard/server.py` | Authenticated local HTTP API and dashboard server. |
 | `src/runboard/tunnel.py` | Optional `cloudflared` quick-tunnel lifecycle. |
-| `src/runboard/cli.py` | `configure`, `serve`, `ls`, `sync`, `url`, `run`, `watch`, `doctor`, `guide`, and version commands. |
+| `src/runboard/cli.py` | `configure`, `serve`, `ls`, `sync`, `url`, `run`, `watch`, `plot`, `top`, `doctor`, `guide`, and version commands. |
 | `src/runboard/runner.py` | `runboard run` wrapper, `runboard watch`, follower orchestration, and follower state. |
 | `src/runboard/follow/` | Dependency-free followers for TensorBoard, JSONL, CSV, Hugging Face state, and text output, plus discovery. |
 | `src/runboard/doctor.py` | `runboard doctor` configuration report and write/read check. |
+| `src/runboard/viewer.py` | Terminal-view data source: server or runs directory, incremental metric loading, selection, and series preparation. |
+| `src/runboard/termplot.py` | Dependency-free braille charts, legends, and ANSI or `curses` color mapping. |
+| `src/runboard/plot.py` | `runboard plot` and the chart grid shared with `runboard top`. |
+| `src/runboard/top.py` | `runboard top`. Keep state changes in `Model` and drawing in `screen()` so both stay testable without a terminal; the `curses` loop only translates keys and paints lines. |
 | `src/runboard/AGENT_GUIDE.md` | Integration guide for coding agents, printed by `runboard guide`. |
 | `docs/integrating.md` | Byte-identical copy of `AGENT_GUIDE.md`. |
 | `src/runboard/static/` | Dashboard source shipped in the wheel. |

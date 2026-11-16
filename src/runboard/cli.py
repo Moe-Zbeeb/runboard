@@ -16,6 +16,8 @@ from urllib.parse import quote
 from . import __version__, config
 from .client import sync
 from .doctor import doctor
+from .plot import cmd_plot
+from .top import cmd_top
 from .runner import run_command, watch_command
 from .server import Server
 from .storage import Storage
@@ -245,6 +247,32 @@ def main(argv=None):
     s.add_argument("--config-json", metavar="FILE", help="record hyperparameters from a JSON file")
     s.add_argument("--config", action="append", default=[], metavar="KEY=VALUE", help="record a hyperparameter")
     s.set_defaults(func=watch_command)
+
+    def view_source(s):
+        s.add_argument("--project", help="only runs in this project")
+        s.add_argument("--metric", "-m", help="only metrics matching this regex")
+        s.add_argument("--smooth", type=float, default=0.0, metavar="A", help="EMA smoothing between 0 and 0.99")
+        s.add_argument("--logy", action="store_true", help="log-scale y axis")
+        s.add_argument("--clip", action="store_true", help="scale y to the 1st-99th percentile to ignore spikes")
+        s.add_argument("--x", choices=["step", "minutes", "time"], default="step", help="x axis")
+        s.add_argument("--dir", default=None, help="read runs from this directory instead of the server")
+        s.add_argument("--server", help="read runs from this server")
+        s.add_argument("--token", help="token for --server")
+
+    s = sub.add_parser("plot", help="print charts of runs in the terminal")
+    s.add_argument("runs", nargs="*", metavar="RUN", help="run names or ids (default: the most recent runs)")
+    view_source(s)
+    s.add_argument("--width", type=int, help="total width in columns (default: the terminal width)")
+    s.add_argument("--height", type=int, default=12, help="height of each chart in rows")
+    s.add_argument("--columns", type=int, help="charts per row (default: fits the width)")
+    s.add_argument("--color", choices=["auto", "always", "never"], default="auto")
+    s.set_defaults(func=cmd_plot)
+
+    s = sub.add_parser("top", help="live full-screen charts in the terminal")
+    s.add_argument("runs", nargs="*", metavar="RUN", help="runs to select at start (default: the most recent runs)")
+    view_source(s)
+    s.add_argument("--interval", type=float, default=5.0, help="seconds between refreshes")
+    s.set_defaults(func=cmd_top)
 
     s = sub.add_parser("doctor", help="check where metrics go and send a test run")
     s.add_argument("--server", help="check this server instead of the configured one")

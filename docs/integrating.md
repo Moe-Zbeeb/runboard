@@ -88,6 +88,8 @@ Running `watch` again on the same path continues the same run without duplicatin
    and `N` is greater than 0. `no metrics found` means none of the formats above were written or
    printed; check where the job writes its logs and use `--watch DIR` or `--source FILE`.
 2. `runboard ls` lists the run with its status and last update time.
+3. `runboard plot <run name or id> --color never` prints its charts as text, so you can check that the
+   metrics have the expected names and shapes without a browser.
 
 Tell the user the project and run name. They open their dashboard as usual.
 
